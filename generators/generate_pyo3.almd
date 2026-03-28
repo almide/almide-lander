@@ -48,14 +48,14 @@ fn py_type(ty: Value) -> String = {
 
 fn gen_record_field_lines(name: String, fields: List[Value]) -> List[String] = {
   var lines: List[String] = []
-  // pyclass
-  lines = lines + ["#[pyclass(name = \"${name}\")]"]
+  // pyclass (frozen = immutable value type)
+  lines = lines + ["#[pyclass(name = \"${name}\", frozen)]"]
   lines = lines + ["#[derive(Clone)]"]
   lines = lines + ["struct Py${name} {"]
   for f in fields {
     let fname = get_str(f, "name")
     let ftype = rust_type(get_type(f))
-    lines = lines + ["    #[pyo3(get, set)]"]
+    lines = lines + ["    #[pyo3(get)]"]
     lines = lines + ["    ${fname}: ${ftype},"]
   }
   lines = lines + ["}"]
@@ -74,6 +74,18 @@ fn gen_record_field_lines(name: String, fields: List[Value]) -> List[String] = {
   // __eq__: value equality
   let eq_parts = fields.map((f) => "self.${get_str(f, "name")} == other.${get_str(f, "name")}").join(" && ")
   lines = lines + ["    fn __eq__(&self, other: &Self) -> bool { ${eq_parts} }"]
+  // to_dict: convert to Python dict
+  lines = lines + ["    fn to_dict(&self) -> std::collections::HashMap<String, f64> {"]
+  lines = lines + ["        let mut m = std::collections::HashMap::new();"]
+  for f in fields {
+    let fname = get_str(f, "name")
+    let fkind = get_str(get_type(f), "kind")
+    if fkind == "float" or fkind == "int" then {
+      lines = lines + ["        m.insert(\"${fname}\".to_string(), self.${fname} as f64);"]
+    } else lines = lines
+  }
+  lines = lines + ["        m"]
+  lines = lines + ["    }"]
   // __hash__: based on all fields
   lines = lines + ["    fn __hash__(&self) -> u64 {"]
   lines = lines + ["        use std::hash::{Hash, Hasher};"]
@@ -108,11 +120,12 @@ fn gen_record_field_lines(name: String, fields: List[Value]) -> List[String] = {
 
 fn gen_variant_lines(name: String, cases: List[Value]) -> List[String] = {
   var lines: List[String] = []
-  lines = lines + ["#[pyclass(name = \"${name}\")]"]
+  lines = lines + ["#[pyclass(name = \"${name}\", frozen)]"]
   lines = lines + ["#[derive(Clone)]"]
   lines = lines + ["struct Py${name} { inner: ${name} }"]
   lines = lines + ["#[pymethods]"]
   lines = lines + ["impl Py${name} {"]
+  // Constructors
   for case in cases {
     let cname = get_str(case, "name").to_lower()
     let case_name = get_str(case, "name")
@@ -122,11 +135,10 @@ fn gen_variant_lines(name: String, cases: List[Value]) -> List[String] = {
         if get_kind(pl) == "tuple" then {
           let pfields = get_arr(pl, "fields")
           let n = list.len(pfields)
-          // For simplicity, handle 1 and 2 field cases
           if n == 1 then {
             let p0type = rust_type(list.get_or(pfields, 0, json.null()))
             lines = lines + ["    #[staticmethod]"]
-            lines = lines + ["    fn ${cname}(v0: ${p0type}) -> Self { Py${name} { inner: ${name}::${case_name}(v0) } }"]
+            lines = lines + ["    fn ${cname}(value: ${p0type}) -> Self { Py${name} { inner: ${name}::${case_name}(value) } }"]
           } else if n == 2 then {
             let p0type = rust_type(list.get_or(pfields, 0, json.null()))
             let p1type = rust_type(list.get_or(pfields, 1, json.null()))
@@ -141,10 +153,22 @@ fn gen_variant_lines(name: String, cases: List[Value]) -> List[String] = {
       },
     }
   }
-  // __repr__: use Debug format of inner enum
-  lines = lines + ["    fn __repr__(&self) -> String { format!(\"{:?}\", self.inner) }"]
-  // __eq__: delegate to inner PartialEq
+  // tag property: which variant is this
+  lines = lines + ["    #[getter]"]
+  lines = lines + ["    fn tag(&self) -> String { format!(\"{:?}\", self.inner).split('(').next().unwrap_or(\"\").to_string() }"]
+  // __repr__
+  lines = lines + ["    fn __repr__(&self) -> String { format!(\"${name}.{:?}\", self.inner) }"]
+  // __str__: same as repr
+  lines = lines + ["    fn __str__(&self) -> String { format!(\"{:?}\", self.inner) }"]
+  // __eq__
   lines = lines + ["    fn __eq__(&self, other: &Self) -> bool { self.inner == other.inner }"]
+  // __hash__
+  lines = lines + ["    fn __hash__(&self) -> u64 {"]
+  lines = lines + ["        use std::hash::{Hash, Hasher};"]
+  lines = lines + ["        let mut h = std::collections::hash_map::DefaultHasher::new();"]
+  lines = lines + ["        format!(\"{:?}\", self.inner).hash(&mut h);"]
+  lines = lines + ["        h.finish()"]
+  lines = lines + ["    }"]
   lines = lines + ["}"]
   lines = lines + ["impl From<&Py${name}> for ${name} {"]
   lines = lines + ["    fn from(p: &Py${name}) -> Self { p.inner.clone() }"]
@@ -213,11 +237,18 @@ fn gen_pyi_lines(iface: Value) -> List[String] = {
       }
       let params = fields.map((fld) => "${get_str(fld, "name")}: ${py_type(get_type(fld))}").join(", ")
       lines = lines + ["    def __init__(self, ${params}) -> None: ..."]
+      lines = lines + ["    def __eq__(self, other: object) -> bool: ..."]
+      lines = lines + ["    def __hash__(self) -> int: ..."]
+      lines = lines + ["    def to_dict(self) -> dict: ..."]
       lines = lines + [""]
     } else if k == "variant" then {
       let cases = get_arr(kind, "cases")
       lines = lines + ["class ${name}:"]
       if doc != "" then lines = lines + ["    \"\"\"${doc}\"\"\""] else lines = lines
+      lines = lines + ["    @property"]
+      lines = lines + ["    def tag(self) -> str: ..."]
+      lines = lines + ["    def __eq__(self, other: object) -> bool: ..."]
+      lines = lines + ["    def __hash__(self) -> int: ..."]
       for case in cases {
         let cname = get_str(case, "name").to_lower()
         let payload = json.get(case, "payload")
@@ -225,13 +256,16 @@ fn gen_pyi_lines(iface: Value) -> List[String] = {
           some(pl) => {
             if get_kind(pl) == "tuple" then {
               let pfields = get_arr(pl, "fields")
-              var indexed: List[String] = []
-              var idx = 0
-              for pf in pfields {
-                indexed = indexed + ["v${int.to_string(idx)}: ${py_type(pf)}"]
-                idx = idx + 1
+              if list.len(pfields) == 1 then "value: ${py_type(list.get_or(pfields, 0, json.null()))}"
+              else {
+                var indexed: List[String] = []
+                var idx = 0
+                for pf in pfields {
+                  indexed = indexed + ["v${int.to_string(idx)}: ${py_type(pf)}"]
+                  idx = idx + 1
+                }
+                indexed.join(", ")
               }
-              indexed.join(", ")
             } else ""
           },
           none => "",
