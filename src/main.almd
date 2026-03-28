@@ -181,8 +181,8 @@ effect fn main() -> Unit = {
         println("Usage: almide run src/main.almd -- --lang ${lang_flag} <source.almd>")
         process.exit(1)
       } else {
-        let lang_count = list.len(langs)
-        let total_steps = 2 + lang_count
+        let lang_count: Int = list.len(langs)
+        let total_steps: Int = 2 + lang_count
 
         // Step 1: Compile interface
         println("[1/${int.to_string(total_steps)}] Compiling interface from ${source_path}...")
