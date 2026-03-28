@@ -41,7 +41,10 @@ jobs:
         run: |
           mkdir -p src
           almide run src/main.almd -- --lang python test/mathlib.almd
-          cp target/debug/libalmide_mathlib.so . 2>/dev/null || cp target/debug/libalmide_mathlib.dylib . 2>/dev/null || true
+          # Copy .so and create .dylib symlink (generated Python expects .dylib)
+          cp target/debug/libalmide_mathlib.so . 2>/dev/null || true
+          cp target/debug/libalmide_mathlib.dylib . 2>/dev/null || true
+          ln -sf libalmide_mathlib.so libalmide_mathlib.dylib 2>/dev/null || true
           python3 -c "
           from almide_mathlib import Point, Shape, distance, area
           assert abs(distance(Point(x=0,y=0), Point(x=3,y=4)) - 5.0) < 0.001
