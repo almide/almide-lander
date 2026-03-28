@@ -1,6 +1,10 @@
 // almide-lander — Cross-Language Package Lander
 //
-// Usage: almide run -- --lang python sample/mathlib.almd
+// Usage:
+//   almide run src/main.almd -- --lang python mylib.almd
+//   almide run src/main.almd -- --lang go,swift mylib.almd
+//   almide run src/main.almd -- --list
+//   almide run src/main.almd -- --dry-run --lang python mylib.almd
 
 import env
 import process
@@ -22,6 +26,14 @@ fn find_flag(args: List[String], flag: String) -> String = {
   value
 }
 
+fn has_flag(args: List[String], flag: String) -> Bool = {
+  var found = false
+  for arg in args {
+    if arg == flag then found = true else found = found
+  }
+  found
+}
+
 fn collect_positional(args: List[String]) -> List[String] = {
   var result: List[String] = []
   var skip_next = false
@@ -30,6 +42,8 @@ fn collect_positional(args: List[String]) -> List[String] = {
       skip_next = false
     } else if arg == "--lang" or arg == "--outdir" then {
       skip_next = true
+    } else if string.starts_with(arg, "--") then {
+      result = result
     } else {
       result = result + [arg]
     }
@@ -37,58 +51,184 @@ fn collect_positional(args: List[String]) -> List[String] = {
   result
 }
 
+// ── Language file extension mapping ──
+
+fn lang_ext(lang: String) -> String = {
+  if lang == "python" then "py"
+  else if lang == "go" then "go"
+  else if lang == "ruby" then "rb"
+  else if lang == "swift" then "swift"
+  else if lang == "csharp" then "cs"
+  else if lang == "dart" then "dart"
+  else if lang == "kotlin" then "kt"
+  else if lang == "java" then "java"
+  else if lang == "c" then "h"
+  else if lang == "zig" then "zig"
+  else if lang == "nim" then "nim"
+  else if lang == "elixir" then "ex"
+  else if lang == "php" then "php"
+  else if lang == "lua" then "lua"
+  else "txt"
+}
+
+// ── Generate binding for a specific language ──
+
+fn generate_binding(lang: String, iface_json: String) -> String = {
+  if lang == "python" then bindgen.bindings.python.generate(iface_json)
+  else if lang == "go" then bindgen.bindings.go.generate(iface_json)
+  else if lang == "ruby" then bindgen.bindings.ruby.generate(iface_json)
+  else if lang == "swift" then bindgen.bindings.swift.generate(iface_json)
+  else if lang == "csharp" then bindgen.bindings.csharp.generate(iface_json)
+  else if lang == "dart" then bindgen.bindings.dart.generate(iface_json)
+  else if lang == "kotlin" then bindgen.bindings.kotlin.generate(iface_json)
+  else if lang == "java" then bindgen.bindings.java.generate(iface_json)
+  else if lang == "c" then bindgen.bindings.c.generate(iface_json)
+  else if lang == "zig" then bindgen.bindings.zig.generate(iface_json)
+  else if lang == "nim" then bindgen.bindings.nim.generate(iface_json)
+  else if lang == "elixir" then bindgen.bindings.elixir.generate(iface_json)
+  else if lang == "php" then bindgen.bindings.php.generate(iface_json)
+  else if lang == "lua" then bindgen.bindings.lua.generate(iface_json)
+  else ""
+}
+
+fn is_supported(lang: String) -> Bool = {
+  var found = false
+  for l in bindgen.supported_languages() {
+    if l == lang then found = true else found = found
+  }
+  found
+}
+
+// ── Help text ──
+
+fn print_help() -> Unit = {
+  println("almide-lander: Cross-Language Package Lander")
+  println("  powered by almide-bindgen v${bindgen.version()}")
+  println("")
+  println("Usage:")
+  println("  almide run src/main.almd -- --lang <language> <source.almd>")
+  println("  almide run src/main.almd -- --lang python,go,swift <source.almd>")
+  println("  almide run src/main.almd -- --list")
+  println("  almide run src/main.almd -- --dry-run --lang python <source.almd>")
+  println("")
+  println("Options:")
+  println("  --lang <languages>   Target language(s), comma-separated")
+  println("  --outdir <dir>       Output directory (default: current)")
+  println("  --list               List supported languages")
+  println("  --dry-run            Show generated code without writing files")
+  println("")
+  println("Languages (${int.to_string(list.len(bindgen.supported_languages()))} supported):")
+  for l in bindgen.supported_languages() {
+    println("  ${l}")
+  }
+}
+
 // ── Main ──
 
 effect fn main() -> Unit = {
   let args = env.args()
-  let lang = find_flag(args, "--lang")
+  let lang_flag = find_flag(args, "--lang")
+  let outdir = find_flag(args, "--outdir")
+  let dry_run = has_flag(args, "--dry-run")
+  let show_list = has_flag(args, "--list")
 
-  if lang == "" then {
-    println("almide-lander: Cross-Language Package Lander")
-    println("  powered by almide-bindgen v${bindgen.version()}")
+  // --list: show supported languages and exit
+  if show_list then {
+    println("Supported languages (${int.to_string(list.len(bindgen.supported_languages()))}):")
     println("")
-    println("Usage: almide run -- --lang <language> <source.almd>")
-    println("")
-    println("Languages (${int.to_string(list.len(bindgen.supported_languages()))} supported):")
     for l in bindgen.supported_languages() {
-      println("  ${l}")
+      println("  ${l}  (.${lang_ext(l)})")
     }
+    process.exit(0)
+  } else if lang_flag == "" then {
+    print_help()
     process.exit(1)
   } else {
-    let positional = collect_positional(args)
-    let source_path = list.get(positional, 0) ?? ""
+    // Parse comma-separated languages
+    let langs = string.split(lang_flag, ",")
 
-    if source_path == "" then {
-      println("Error: no .almd source file specified")
+    // Validate all languages
+    var all_valid = true
+    for l in langs {
+      if not is_supported(l) then {
+        println("Error: unsupported language '${l}'")
+        all_valid = false
+      } else all_valid = all_valid
+    }
+    if not all_valid then {
+      println("")
+      println("Supported: ${bindgen.supported_languages().join(", ")}")
       process.exit(1)
     } else {
-      // Step 1: Compile interface
-      println("[1/4] Compiling interface...")
-      let iface_json = process.exec("almide", ["compile", source_path, "--json"])!
+      let positional = collect_positional(args)
+      let source_path = list.get(positional, 0) ?? ""
 
-      // Step 2: Generate Rust source
-      println("[2/4] Generating Rust source...")
-      let rust_source = process.exec("almide", [source_path, "--target", "rust", "--repr-c"])!
+      if source_path == "" then {
+        println("Error: no .almd source file specified")
+        println("")
+        println("Usage: almide run src/main.almd -- --lang ${lang_flag} <source.almd>")
+        process.exit(1)
+      } else {
+        let lang_count = list.len(langs)
+        let total_steps = 2 + lang_count
 
-      // Step 3: Generate scaffolding + build
-      println("[3/4] Building shared library...")
-      let scaffolding_rs = bindgen.scaffolding.generate(iface_json, rust_source)
-      let cargo_toml = bindgen.scaffolding.generate_cargo(iface_json)
-      fs.write("src/lib.rs", scaffolding_rs)!
-      fs.write("Cargo.toml", cargo_toml)!
-      process.exec("cargo", ["build"])!
-      println("  Build OK")
+        // Step 1: Compile interface
+        println("[1/${int.to_string(total_steps)}] Compiling interface from ${source_path}...")
+        let iface_json = process.exec("almide", ["compile", source_path, "--json"])!
+        let iface = json.parse(iface_json) ?? json.null()
+        let module_name = json.as_string(json.get(iface, "module") ?? json.from_string("module")) ?? "module"
 
-      // Step 4: Generate language binding
-      println("[4/4] Generating ${lang} binding...")
-      let binding_code = if lang == "python" then bindgen.bindings.python.generate(iface_json)
-        else "// Language '${lang}': use almide run bindgen/src/bindings/${lang}.almd"
-      let iface = json.parse(iface_json) ?? json.null()
-      let module_name = json.as_string(json.get(iface, "module") ?? json.from_string("module")) ?? "module"
-      fs.write("almide_${module_name}.py", binding_code)!
-      println("  Generated: almide_${module_name}.py")
-      println("")
-      println("Done.")
+        if dry_run then {
+          // Dry run: just show the first language's output
+          let first_lang = list.get(langs, 0) ?? "python"
+          println("")
+          println("=== ${first_lang} binding for ${module_name} ===")
+          println("")
+          println(generate_binding(first_lang, iface_json))
+        } else {
+          // Step 2: Build shared library
+          println("[2/${int.to_string(total_steps)}] Building shared library...")
+          let rust_source = process.exec("almide", [source_path, "--target", "rust", "--repr-c"])!
+          let scaffolding_rs = bindgen.scaffolding.generate(iface_json, rust_source)
+          let cargo_toml = bindgen.scaffolding.generate_cargo(iface_json)
+          let out_src = if outdir != "" then "${outdir}/src" else "src"
+          fs.mkdir_p(out_src)!
+          fs.write("${out_src}/lib.rs", scaffolding_rs)!
+          let cargo_path = if outdir != "" then "${outdir}/Cargo.toml" else "Cargo.toml"
+          fs.write(cargo_path, cargo_toml)!
+          let _build = if outdir != "" then {
+            process.exec("cargo", ["build", "--manifest-path", cargo_path])!
+          } else {
+            process.exec("cargo", ["build"])!
+          }
+          println("  OK")
+
+          // Step 3+: Generate each language binding
+          var step = 3
+          for lang in langs {
+            println("[${int.to_string(step)}/${int.to_string(total_steps)}] Generating ${lang} binding...")
+            let code = generate_binding(lang, iface_json)
+            let ext = lang_ext(lang)
+            let filename = if outdir != "" then "${outdir}/almide_${module_name}.${ext}"
+              else "almide_${module_name}.${ext}"
+            fs.write(filename, code)!
+            println("  ${filename}")
+            step = step + 1
+          }
+
+          // Summary
+          println("")
+          println("Done. Generated ${int.to_string(lang_count)} binding(s) for ${module_name}.")
+          if lang_count == 1 then {
+            let l = list.get(langs, 0) ?? ""
+            let ext = lang_ext(l)
+            if l == "python" then {
+              println("")
+              println("  python3 -c \"from almide_${module_name} import *\"")
+            } else println("")
+          } else println("")
+        }
+      }
     }
   }
 }
