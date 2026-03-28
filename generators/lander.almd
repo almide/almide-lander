@@ -1,38 +1,32 @@
-// lander.almd — CLI dispatcher for almide-lander generators
+// lander.almd — CLI dispatcher for almide-lander
 //
-// Usage: almide run lander.almd -- --lang python interface.json mathlib.rs
+// Usage: almide run lander.almd -- --lang python mylib.almd
 //
-// Dispatches to the appropriate generator based on --lang:
-//   python  -> generate_pyo3.almd
-//   node    -> generate_napi.almd
-//   uniffi  -> generate_uniffi.almd
-//   wasm    -> generate_wasm_js.almd
-//   c       -> generate_c_ffi.almd
-//   ruby    -> generate_magnus.almd
+// The lander handles the full pipeline:
+//   1. almide compile mylib.almd --json → interface.json
+//   2. almide mylib.almd --target rust → source.rs
+//   3. Dispatches to the appropriate generator
 
 import env
 import process
 import fs
+import json
 
 // ── Parse --lang from args ──
 
-fn find_lang(args: List[String]) -> String = {
-  let n = list.len(args)
-  if n < 2 then ""
-  else {
-    var lang = ""
-    var i = 0
-    for arg in args {
-      if arg == "--lang" then {
-        lang = list.get_or(args, i + 1, "")
-      } else lang = lang
-      i = i + 1
-    }
-    lang
+fn find_flag(args: List[String], flag: String) -> String = {
+  var value = ""
+  var i = 0
+  for arg in args {
+    if arg == flag then {
+      value = list.get(args, i + 1) ?? ""
+    } else value = value
+    i = i + 1
   }
+  value
 }
 
-// ── Collect positional args (skip --lang and its value) ──
+// ── Collect positional args (skip flag pairs) ──
 
 fn collect_positional(args: List[String]) -> List[String] = {
   var result: List[String] = []
@@ -40,7 +34,7 @@ fn collect_positional(args: List[String]) -> List[String] = {
   for arg in args {
     if skip_next then {
       skip_next = false
-    } else if arg == "--lang" then {
+    } else if arg == "--lang" or arg == "--outdir" or arg == "--gendir" then {
       skip_next = true
     } else {
       result = result + [arg]
@@ -54,6 +48,10 @@ fn collect_positional(args: List[String]) -> List[String] = {
 fn generator_file(lang: String) -> String = {
   if lang == "python" then "generate_pyo3.almd"
   else if lang == "node" then "generate_napi.almd"
+  else if lang == "js" then "generate_wasm_js.almd"
+  else if lang == "ts" then "generate_wasm_js.almd"
+  else if lang == "swift" then "generate_uniffi.almd"
+  else if lang == "kotlin" then "generate_uniffi.almd"
   else if lang == "uniffi" then "generate_uniffi.almd"
   else if lang == "wasm" then "generate_wasm_js.almd"
   else if lang == "c" then "generate_c_ffi.almd"
@@ -61,50 +59,79 @@ fn generator_file(lang: String) -> String = {
   else ""
 }
 
-// ── Resolve generator path relative to this script's directory ──
-
-fn resolve_generator_path(generator_name: String) -> String = {
-  // Generators live alongside this file in the generators/ directory.
-  // We use the known directory structure.
-  "generators/${generator_name}"
-}
-
 // ── Main ──
 
 effect fn main() -> Unit = {
   let args = env.args()
-  let lang = find_lang(args)
+  let lang = find_flag(args, "--lang")
+  let outdir = find_flag(args, "--outdir")
+  let gendir = find_flag(args, "--gendir")
 
   if lang == "" then {
-    println("Error: --lang <language> is required")
+    println("almide-lander: Cross-Language Package Lander")
     println("")
-    println("Usage: almide run lander.almd -- --lang <language> interface.json [mathlib.rs]")
+    println("Usage: almide run lander.almd -- --lang <language> <source.almd>")
     println("")
-    println("Languages: python, node, uniffi, wasm, c, ruby")
+    println("Languages:")
+    println("  python   Python native extension (PyO3 + maturin)")
+    println("  node     Node.js native addon (napi-rs)")
+    println("  js, ts   JS/TS via WASM wrapper")
+    println("  swift    Swift module (UniFFI)")
+    println("  kotlin   Kotlin bindings (UniFFI)")
+    println("  c        C shared library + header")
+    println("  ruby     Ruby native extension (Magnus)")
+    println("")
+    println("Options:")
+    println("  --lang <language>   Target language (required)")
+    println("  --outdir <dir>      Output directory (default: current)")
+    println("  --gendir <dir>      Generator directory (default: generators/)")
     process.exit(1)
   } else {
     let gen_file = generator_file(lang)
     if gen_file == "" then {
       println("Error: unknown language '${lang}'")
-      println("Supported: python, node, uniffi, wasm, c, ruby")
+      println("Run without arguments to see supported languages.")
       process.exit(1)
     } else {
       let positional = collect_positional(args)
-      let iface_path = list.get_or(positional, 0, "interface.json")
+      let source_path = list.get(positional, 0) ?? ""
 
-      // Build the almide run command args
-      var run_args: List[String] = ["run", gen_file, "--"]
-      run_args = run_args + [iface_path]
+      if source_path == "" then {
+        println("Error: no .almd source file specified")
+        println("Usage: almide run lander.almd -- --lang ${lang} <source.almd>")
+        process.exit(1)
+      } else {
+        // Step 1: Generate interface JSON
+        println("[1/3] Compiling interface...")
+        let iface_output = process.exec("almide", ["compile", source_path, "--json"])!
+        let iface_path = if outdir != "" then "${outdir}/interface.json" else "interface.json"
+        fs.write(iface_path, iface_output)!
 
-      // For non-wasm targets, pass the rust source path
-      if lang != "wasm" then {
-        let rust_path = list.get_or(positional, 1, "mathlib.rs")
-        run_args = run_args + [rust_path]
-      } else run_args = run_args
+        // Step 2: Generate Rust source (for native targets)
+        let needs_rust = lang != "js" and lang != "ts" and lang != "wasm"
+        let rust_path = if outdir != "" then "${outdir}/source.rs" else "source.rs"
+        if needs_rust then {
+          println("[2/3] Generating Rust source...")
+          let rust_output = process.exec("almide", [source_path, "--target", "rust"])!
+          fs.write(rust_path, rust_output)!
+        } else {
+          println("[2/3] Building WASM...")
+          let wasm_out = process.exec("almide", ["build", source_path, "--target", "wasm"])!
+          println(wasm_out)
+        }
 
-      println("Dispatching to ${gen_file} ...")
-      let output = process.exec("almide", run_args)!
-      println(output)
+        // Step 3: Run the generator
+        println("[3/3] Generating ${lang} bindings...")
+        let gen_path = if gendir != "" then "${gendir}/${gen_file}" else "generators/${gen_file}"
+        var gen_args: List[String] = ["run", gen_path, "--", iface_path]
+        if needs_rust then {
+          gen_args = gen_args + [rust_path]
+        } else gen_args = gen_args
+
+        let gen_output = process.exec("almide", gen_args)!
+        println(gen_output)
+        println("Done.")
+      }
     }
   }
 }
