@@ -1,0 +1,286 @@
+// generate_pyo3.almd — Generate PyO3 bindings from Almide Module Interface
+//
+// Usage: almide run generate_pyo3.almd -- interface.json mathlib.rs
+
+import json
+import fs
+import env
+
+// ── JSON helpers ──
+
+fn get_str(v: Value, key: String) -> String =
+  json.as_string(json.get(v, key) ?? json.from_string("")) ?? ""
+
+fn get_arr(v: Value, key: String) -> List[Value] =
+  json.as_array(json.get(v, key) ?? json.array([])) ?? []
+
+fn get_kind(v: Value) -> String = get_str(v, "kind")
+
+fn get_type(v: Value) -> Value = json.get(v, "type") ?? json.null()
+
+// ── Type mapping ──
+
+fn rust_type(ty: Value) -> String = {
+  let kind = get_str(ty, "kind")
+  if kind == "float" then "f64"
+  else if kind == "int" then "i64"
+  else if kind == "string" then "String"
+  else if kind == "bool" then "bool"
+  else if kind == "named" then get_str(ty, "name")
+  else if kind == "option" then "Option<${rust_type(json.get(ty, "inner") ?? json.null())}>"
+  else if kind == "list" then "Vec<${rust_type(json.get(ty, "inner") ?? json.null())}>"
+  else "/* unknown */"
+}
+
+fn py_type(ty: Value) -> String = {
+  let kind = get_str(ty, "kind")
+  if kind == "float" then "float"
+  else if kind == "int" then "int"
+  else if kind == "string" then "str"
+  else if kind == "bool" then "bool"
+  else if kind == "named" then get_str(ty, "name")
+  else if kind == "option" then "${py_type(json.get(ty, "inner") ?? json.null())} | None"
+  else if kind == "list" then "list[${py_type(json.get(ty, "inner") ?? json.null())}]"
+  else "Any"
+}
+
+// ── Record codegen ──
+
+fn gen_record_field_lines(name: String, fields: List[Value]) -> List[String] = {
+  var lines: List[String] = []
+  // pyclass
+  lines = lines + ["#[pyclass(name = \"${name}\")]"]
+  lines = lines + ["#[derive(Clone)]"]
+  lines = lines + ["struct Py${name} {"]
+  for f in fields {
+    let fname = get_str(f, "name")
+    let ftype = rust_type(get_type(f))
+    lines = lines + ["    #[pyo3(get, set)]"]
+    lines = lines + ["    ${fname}: ${ftype},"]
+  }
+  lines = lines + ["}"]
+
+  // pymethods: new + repr
+  lines = lines + ["#[pymethods]"]
+  lines = lines + ["impl Py${name} {"]
+  let param_parts = fields.map((f) => "${get_str(f, "name")}: ${rust_type(get_type(f))}")
+  let params = param_parts.join(", ")
+  let args = fields.map((f) => get_str(f, "name")).join(", ")
+  lines = lines + ["    #[new]"]
+  lines = lines + ["    fn new(${params}) -> Self { Py${name} { ${args} } }"]
+  let fmt_str = fields.map((f) => "${get_str(f, "name")}={}").join(", ")
+  let fmt_args = fields.map((f) => "self.${get_str(f, "name")}").join(", ")
+  lines = lines + ["    fn __repr__(&self) -> String { format!(\"${name}(${fmt_str})\", ${fmt_args}) }"]
+  lines = lines + ["}"]
+
+  // From conversions
+  let from_fields = fields.map((f) => "${get_str(f, "name")}: p.${get_str(f, "name")}.clone()").join(", ")
+  lines = lines + ["impl From<&Py${name}> for ${name} {"]
+  lines = lines + ["    fn from(p: &Py${name}) -> Self { ${name} { ${from_fields} } }"]
+  lines = lines + ["}"]
+  let to_fields = fields.map((f) => "${get_str(f, "name")}: a.${get_str(f, "name")}").join(", ")
+  lines = lines + ["impl From<${name}> for Py${name} {"]
+  lines = lines + ["    fn from(a: ${name}) -> Self { Py${name} { ${to_fields} } }"]
+  lines = lines + ["}"]
+  lines = lines + [""]
+  lines
+}
+
+// ── Variant codegen ──
+
+fn gen_variant_lines(name: String, cases: List[Value]) -> List[String] = {
+  var lines: List[String] = []
+  lines = lines + ["#[pyclass(name = \"${name}\")]"]
+  lines = lines + ["#[derive(Clone)]"]
+  lines = lines + ["struct Py${name} { inner: ${name} }"]
+  lines = lines + ["#[pymethods]"]
+  lines = lines + ["impl Py${name} {"]
+  for case in cases {
+    let cname = get_str(case, "name").to_lower()
+    let case_name = get_str(case, "name")
+    let payload = json.get(case, "payload")
+    match payload {
+      some(pl) => {
+        if get_kind(pl) == "tuple" then {
+          let pfields = get_arr(pl, "fields")
+          let n = list.len(pfields)
+          // For simplicity, handle 1 and 2 field cases
+          if n == 1 then {
+            let p0type = rust_type(list.get_or(pfields, 0, json.null()))
+            lines = lines + ["    #[staticmethod]"]
+            lines = lines + ["    fn ${cname}(v0: ${p0type}) -> Self { Py${name} { inner: ${name}::${case_name}(v0) } }"]
+          } else if n == 2 then {
+            let p0type = rust_type(list.get_or(pfields, 0, json.null()))
+            let p1type = rust_type(list.get_or(pfields, 1, json.null()))
+            lines = lines + ["    #[staticmethod]"]
+            lines = lines + ["    fn ${cname}(v0: ${p0type}, v1: ${p1type}) -> Self { Py${name} { inner: ${name}::${case_name}(v0, v1) } }"]
+          } else lines = lines
+        } else lines = lines
+      },
+      none => {
+        lines = lines + ["    #[staticmethod]"]
+        lines = lines + ["    fn ${cname}() -> Self { Py${name} { inner: ${name}::${case_name} } }"]
+      },
+    }
+  }
+  lines = lines + ["}"]
+  lines = lines + ["impl From<&Py${name}> for ${name} {"]
+  lines = lines + ["    fn from(p: &Py${name}) -> Self { p.inner.clone() }"]
+  lines = lines + ["}"]
+  lines = lines + [""]
+  lines
+}
+
+// ── Function codegen ──
+
+fn gen_fn_lines(f: Value) -> List[String] = {
+  let fname = get_str(f, "name")
+  let params = get_arr(f, "params")
+  let ret = json.get(f, "return") ?? json.null()
+  let doc = get_str(f, "doc")
+
+  let param_strs = params.map((p) => {
+    let ptype = json.get(p, "type") ?? json.null()
+    if get_kind(ptype) == "named" then "${get_str(p, "name")}: Py${get_str(ptype, "name")}"
+    else "${get_str(p, "name")}: ${rust_type(ptype)}"
+  })
+
+  let call_args = params.map((p) => {
+    let ptype = json.get(p, "type") ?? json.null()
+    if get_kind(ptype) == "named" then "${get_str(ptype, "name")}::from(&${get_str(p, "name")})"
+    else get_str(p, "name")
+  })
+
+  let params_str = param_strs.join(", ")
+  let args_str = call_args.join(", ")
+  let ret_kind = get_kind(ret)
+
+  let ret_type = if ret_kind == "named" then "Py${get_str(ret, "name")}" else rust_type(ret)
+  let ret_wrap = if ret_kind == "named" then "Py${get_str(ret, "name")}::from(${fname}(${args_str}))" else "${fname}(${args_str})"
+
+  var lines: List[String] = []
+  if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
+  lines = lines + ["#[pyfunction]"]
+  lines = lines + ["#[pyo3(name = \"${fname}\")]"]
+  lines = lines + ["fn py_${fname}(${params_str}) -> ${ret_type} { ${ret_wrap} }"]
+  lines = lines + [""]
+  lines
+}
+
+// ── .pyi stub ──
+
+fn gen_pyi_lines(iface: Value) -> List[String] = {
+  let module_name = get_str(iface, "module")
+  let types = get_arr(iface, "types")
+  let functions = get_arr(iface, "functions")
+
+  var lines: List[String] = ["\"\"\"Almide module: ${module_name}\"\"\"", ""]
+
+  for t in types {
+    let name = get_str(t, "name")
+    let doc = get_str(t, "doc")
+    let kind = json.get(t, "kind") ?? json.null()
+    let k = get_kind(kind)
+
+    if k == "record" then {
+      let fields = get_arr(kind, "fields")
+      lines = lines + ["class ${name}:"]
+      if doc != "" then lines = lines + ["    \"\"\"${doc}\"\"\""] else lines = lines
+      for fld in fields {
+        lines = lines + ["    ${get_str(fld, "name")}: ${py_type(get_type(fld))}"]
+      }
+      let params = fields.map((fld) => "${get_str(fld, "name")}: ${py_type(get_type(fld))}").join(", ")
+      lines = lines + ["    def __init__(self, ${params}) -> None: ..."]
+      lines = lines + [""]
+    } else if k == "variant" then {
+      let cases = get_arr(kind, "cases")
+      lines = lines + ["class ${name}:"]
+      if doc != "" then lines = lines + ["    \"\"\"${doc}\"\"\""] else lines = lines
+      for case in cases {
+        let cname = get_str(case, "name").to_lower()
+        lines = lines + ["    @staticmethod"]
+        lines = lines + ["    def ${cname}(...) -> ${name}: ..."]
+      }
+      lines = lines + [""]
+    } else lines = lines
+  }
+
+  for f in functions {
+    let fname = get_str(f, "name")
+    let params = get_arr(f, "params")
+    let ret = py_type(json.get(f, "return") ?? json.null())
+    let doc = get_str(f, "doc")
+    let params_str = params.map((p) => "${get_str(p, "name")}: ${py_type(get_type(p))}").join(", ")
+    lines = lines + ["def ${fname}(${params_str}) -> ${ret}:"]
+    if doc != "" then lines = lines + ["    \"\"\"${doc}\"\"\""] else lines = lines
+    lines = lines + ["    ..."]
+    lines = lines + [""]
+  }
+  lines
+}
+
+// ── Main ──
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let iface_path = list.get(args, 0) ?? "interface.json"
+  let rust_path = list.get(args, 1) ?? "mathlib.rs"
+
+  let iface_text = fs.read_text(iface_path)!
+  let iface = json.parse(iface_text)!
+  let rust_source = fs.read_text(rust_path)!
+
+  let module_name = get_str(iface, "module")
+  let types = get_arr(iface, "types")
+  let functions = get_arr(iface, "functions")
+
+  var lines: List[String] = []
+  lines = lines + ["// AUTO-GENERATED by almide-lander — do not edit"]
+  lines = lines + ["use pyo3::prelude::*;"]
+  lines = lines + [""]
+
+  // Include Almide-generated Rust (stripped)
+  for line in string.lines(rust_source) {
+    if string.starts_with(line, "#![allow") then lines = lines
+    else if string.starts_with(line, "use std::collections") then lines = lines
+    else if string.contains(line, "fn main(") then lines = lines
+    else lines = lines + [line]
+  }
+  lines = lines + [""]
+
+  // Generate type wrappers
+  for t in types {
+    let name = get_str(t, "name")
+    let kind = json.get(t, "kind") ?? json.null()
+    let k = get_kind(kind)
+    if k == "record" then {
+      lines = lines + gen_record_field_lines(name, get_arr(kind, "fields"))
+    } else if k == "variant" then {
+      lines = lines + gen_variant_lines(name, get_arr(kind, "cases"))
+    } else lines = lines
+  }
+
+  // Generate function wrappers
+  for f in functions {
+    lines = lines + gen_fn_lines(f)
+  }
+
+  // Generate module registration
+  lines = lines + ["#[pymodule]"]
+  lines = lines + ["fn almide_${module_name}(m: &Bound<'_, PyModule>) -> PyResult<()> {"]
+  for t in types {
+    lines = lines + ["    m.add_class::<Py${get_str(t, "name")}>()?;"]
+  }
+  for f in functions {
+    lines = lines + ["    m.add_function(wrap_pyfunction!(py_${get_str(f, "name")}, m)?)?;"]
+  }
+  lines = lines + ["    Ok(())"]
+  lines = lines + ["}"]
+
+  fs.write("src/lib.rs", lines.join("\n"))!
+
+  let pyi = gen_pyi_lines(iface)
+  fs.write("almide_${module_name}.pyi", pyi.join("\n"))!
+
+  println("Generated: src/lib.rs + almide_${module_name}.pyi")
+}
