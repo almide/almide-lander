@@ -1,0 +1,136 @@
+// almide-lander — CLI tool for cross-language module export
+//
+// Usage:
+//   almide run src/main.almd -- --lang python mylib.almd
+//   almide run src/main.almd -- --lang go mylib.almd
+//
+// Depends on: bindgen (almide-bindgen library)
+// Pipeline:
+//   1. almide compile mylib.almd --json → interface.json
+//   2. almide mylib.almd --target rust --repr-c → source.rs
+//   3. almide run bindgen/src/scaffolding.almd → Rust FFI scaffolding
+//   4. cargo build → shared library
+//   5. almide run bindgen/src/bindings/<lang>.almd → language wrapper
+
+import env
+import process
+import fs
+import bindgen
+
+// ── CLI argument parsing ──
+
+fn find_flag(args: List[String], flag: String) -> String = {
+  var value = ""
+  var i = 0
+  for arg in args {
+    if arg == flag then {
+      value = list.get(args, i + 1) ?? ""
+    } else value = value
+    i = i + 1
+  }
+  value
+}
+
+fn collect_positional(args: List[String]) -> List[String] = {
+  var result: List[String] = []
+  var skip_next = false
+  for arg in args {
+    if skip_next then {
+      skip_next = false
+    } else if arg == "--lang" or arg == "--outdir" then {
+      skip_next = true
+    } else {
+      result = result + [arg]
+    }
+  }
+  result
+}
+
+// ── Language → generator file mapping ──
+
+fn generator_path(lang: String) -> String = {
+  let base = "src/bindings"
+  if lang == "python" then "${base}/python.almd"
+  else if lang == "go" then "${base}/go.almd"
+  else if lang == "ruby" then "${base}/ruby.almd"
+  else if lang == "swift" then "${base}/swift.almd"
+  else if lang == "csharp" or lang == "cs" then "${base}/csharp.almd"
+  else if lang == "dart" then "${base}/dart.almd"
+  else if lang == "kotlin" or lang == "kt" then "${base}/kotlin.almd"
+  else if lang == "java" then "${base}/java.almd"
+  else if lang == "c" then "${base}/c.almd"
+  else if lang == "zig" then "${base}/zig.almd"
+  else if lang == "nim" then "${base}/nim.almd"
+  else if lang == "elixir" or lang == "ex" then "${base}/elixir.almd"
+  else if lang == "php" then "${base}/php.almd"
+  else if lang == "lua" then "${base}/lua.almd"
+  else ""
+}
+
+// ── Main ──
+
+effect fn main() -> Unit = {
+  let args = env.args()
+  let lang = find_flag(args, "--lang")
+  let outdir = find_flag(args, "--outdir")
+
+  if lang == "" then {
+    println("almide-lander: Cross-Language Package Lander")
+    println("  powered by almide-bindgen v${bindgen.version()}")
+    println("")
+    println("Usage: almide run src/main.almd -- --lang <language> <source.almd>")
+    println("")
+    println("Languages (${int.to_string(list.len(bindgen.supported_languages()))} supported):")
+    for l in bindgen.supported_languages() {
+      println("  ${l}")
+    }
+    println("")
+    println("Options:")
+    println("  --lang <language>   Target language (required)")
+    println("  --outdir <dir>      Output directory (default: current)")
+    process.exit(1)
+  } else {
+    let gen = generator_path(lang)
+    if gen == "" then {
+      println("Error: unknown language '${lang}'")
+      println("Supported: ${bindgen.supported_languages().join(", ")}")
+      process.exit(1)
+    } else {
+      let positional = collect_positional(args)
+      let source_path = list.get(positional, 0) ?? ""
+
+      if source_path == "" then {
+        println("Error: no .almd source file specified")
+        println("Usage: almide run src/main.almd -- --lang ${lang} <source.almd>")
+        process.exit(1)
+      } else {
+        // Step 1: Generate interface JSON
+        println("[1/4] Compiling interface...")
+        let iface_output = process.exec("almide", ["compile", source_path, "--json"])!
+        let iface_path = if outdir != "" then "${outdir}/interface.json" else "interface.json"
+        fs.write(iface_path, iface_output)!
+
+        // Step 2: Generate Rust source
+        println("[2/4] Generating Rust source (--repr-c)...")
+        let rust_output = process.exec("almide", [source_path, "--target", "rust", "--repr-c"])!
+        let rust_path = if outdir != "" then "${outdir}/source.rs" else "source.rs"
+        fs.write(rust_path, rust_output)!
+
+        // Step 3: Generate scaffolding + build
+        println("[3/4] Generating scaffolding + building...")
+        let scaffolding_path = "src/scaffolding.almd"
+        let scaff_output = process.exec("almide", ["run", scaffolding_path, "--", iface_path, rust_path])!
+        println(scaff_output)
+        let build_output = process.exec("cargo", ["build"])!
+        println(build_output)
+
+        // Step 4: Generate language binding
+        println("[4/4] Generating ${lang} binding...")
+        let bind_output = process.exec("almide", ["run", gen, "--", iface_path])!
+        println(bind_output)
+
+        println("Done. ${lang} binding ready.")
+      }
+    }
+  }
+}

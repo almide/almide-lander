@@ -1,0 +1,6 @@
+[package]
+name = "lander"
+version = "0.1.0"
+
+[dependencies]
+bindgen = { git = "https://github.com/almide/almide-bindgen.git" }
