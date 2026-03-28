@@ -78,7 +78,10 @@ Everything is written in Almide. No Python, no external tool dependencies.
 
 ## Demo
 
+### 1. Write Almide
+
 ```almide
+// mathlib.almd
 import math
 
 type Point = { x: Float, y: Float }
@@ -95,6 +98,24 @@ fn area(shape: Shape) -> Float = match shape {
   Rect(w, h) => w * h,
 }
 ```
+
+### 2. Land it
+
+```bash
+almide run src/main.almd -- --lang python mathlib.almd
+```
+
+```
+[1/3] Compiling interface from mathlib.almd...
+[2/3] Building shared library...
+  OK
+[3/3] Generating python binding...
+  almide_mathlib.py
+
+Done. Generated 1 binding(s) for mathlib.
+```
+
+### 3. Use it
 
 **Python**
 ```python
