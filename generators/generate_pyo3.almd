@@ -1,6 +1,9 @@
 // generate_pyo3.almd — Generate PyO3 bindings from Almide Module Interface
 //
-// Usage: almide run generate_pyo3.almd -- interface.json mathlib.rs
+// Usage: almide run generate_pyo3.almd -- interface.json source.rs
+//
+// With --repr-c, the Almide Rust has pub types/fields. We include it
+// directly at the top level and add Py-prefixed wrappers alongside.
 
 import json
 import fs
@@ -103,7 +106,7 @@ fn gen_record_field_lines(name: String, fields: List[Value]) -> List[String] = {
   lines = lines + ["    }"]
   lines = lines + ["}"]
 
-  // From conversions
+  // From conversions (Almide types are at top level, no inner:: prefix)
   let from_fields = fields.map((f) => "${get_str(f, "name")}: p.${get_str(f, "name")}.clone()").join(", ")
   lines = lines + ["impl From<&Py${name}> for ${name} {"]
   lines = lines + ["    fn from(p: &Py${name}) -> Self { ${name} { ${from_fields} } }"]
@@ -296,7 +299,7 @@ fn gen_pyi_lines(iface: Value) -> List[String] = {
 effect fn main() -> Unit = {
   let args = env.args()
   let iface_path = list.get(args, 0) ?? "interface.json"
-  let rust_path = list.get(args, 1) ?? "mathlib.rs"
+  let rust_path = list.get(args, 1) ?? "source.rs"
 
   let iface_text = fs.read_text(iface_path)!
   let iface = json.parse(iface_text)!
@@ -311,10 +314,9 @@ effect fn main() -> Unit = {
   lines = lines + ["use pyo3::prelude::*;"]
   lines = lines + [""]
 
-  // Include Almide-generated Rust (stripped)
+  // Include Almide-generated Rust directly (already has pub types from --repr-c)
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then lines = lines
-    else if string.starts_with(line, "use std::collections") then lines = lines
     else if string.contains(line, "fn main(") then lines = lines
     else lines = lines + [line]
   }

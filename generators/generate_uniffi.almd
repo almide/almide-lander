@@ -1,11 +1,11 @@
 // generate_uniffi.almd — Generate UniFFI-annotated Rust crate from Almide Module Interface
 //
-// Usage: almide run generate_uniffi.almd -- interface.json mathlib.rs
+// Usage: almide run generate_uniffi.almd -- interface.json source.rs
 //
-// UniFFI uses proc macros that annotate the actual types.  We wrap the
-// Almide-generated Rust in `mod inner` and define UniFFI-annotated types
-// in the outer scope, with From impls to convert between the two.
-// Exported functions delegate to inner:: with type conversions.
+// UniFFI uses its own proc macros (uniffi::Record, uniffi::Enum, uniffi::export)
+// that annotate standalone types. The Almide-generated Rust is kept in mod inner
+// with conversions between UniFFI types and inner types. With --repr-c, the
+// inner types are already pub, so no manual visibility changes are needed.
 
 import json
 import fs
@@ -150,7 +150,7 @@ fn gen_uniffi_bindgen() -> String =
 effect fn main() -> Unit = {
   let args = env.args()
   let iface_path = list.get(args, 0) ?? "interface.json"
-  let rust_path = list.get(args, 1) ?? "mathlib.rs"
+  let rust_path = list.get(args, 1) ?? "source.rs"
 
   let iface_text = fs.read_text(iface_path)!
   let iface = json.parse(iface_text)!
@@ -165,15 +165,12 @@ effect fn main() -> Unit = {
   lines = lines + ["#![allow(unused_parens, unused_variables, dead_code, unused_imports)]"]
   lines = lines + [""]
 
-  // Inline the Almide-generated Rust in a private module so that
-  // exported functions can delegate to inner:: with type conversions
+  // Almide-generated Rust in mod inner (UniFFI needs its own proc-macro types)
+  // Types are already pub from --repr-c
   lines = lines + ["mod inner {"]
   lines = lines + ["    #![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then lines = lines
-    else if string.starts_with(line, "use std::collections") then {
-        lines = lines + ["    " + line]
-    }
     else if string.contains(line, "fn main(") then lines = lines
     else lines = lines + ["    " + line]
   }

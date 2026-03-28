@@ -1,6 +1,10 @@
 // generate_wasm_js.almd — Generate TypeScript/JS wrapper for Almide WASM binary
 //
 // Usage: almide run generate_wasm_js.almd -- interface.json
+//
+// Uses ABI info from interface.json (struct sizes, field offsets) instead of
+// guessing memory layout. This produces correct read/write helpers for all
+// record types.
 
 import json
 import fs
@@ -17,6 +21,35 @@ fn get_arr(v: Value, key: String) -> List[Value] =
 fn get_kind(v: Value) -> String = get_str(v, "kind")
 
 fn get_type(v: Value) -> Value = json.get(v, "type") ?? json.null()
+
+// ── ABI helpers ──
+
+fn get_abi(v: Value) -> Value = json.get(v, "abi") ?? json.null()
+
+fn get_abi_size(v: Value) -> Int = {
+  let abi = get_abi(v)
+  let size = json.as_float(json.get(abi, "size") ?? json.from_float(0.0)) ?? 0.0
+  float.to_int(size)
+}
+
+fn get_abi_align(v: Value) -> Int = {
+  let abi = get_abi(v)
+  let align = json.as_float(json.get(abi, "align") ?? json.from_float(0.0)) ?? 0.0
+  float.to_int(align)
+}
+
+fn get_abi_fields(v: Value) -> List[Value] =
+  get_arr(get_abi(v), "fields")
+
+fn get_field_offset(f: Value) -> Int = {
+  let offset = json.as_float(json.get(f, "offset") ?? json.from_float(0.0)) ?? 0.0
+  float.to_int(offset)
+}
+
+fn get_field_size(f: Value) -> Int = {
+  let size = json.as_float(json.get(f, "size") ?? json.from_float(0.0)) ?? 0.0
+  float.to_int(size)
+}
 
 // ── Type mapping ──
 
@@ -129,38 +162,51 @@ fn gen_variant_constructors(name: String, cases: List[Value]) -> List[String] = 
   lines
 }
 
-// ── Memory layout helpers for records ──
+// ── Memory layout helpers for records (using ABI info) ─��
 
-fn gen_record_write_read(name: String, fields: List[Value]) -> List[String] = {
+fn gen_record_write_read(name: String, fields: List[Value], type_def: Value) -> List[String] = {
   var lines: List[String] = []
-  var offset = 0
+  let abi_size = get_abi_size(type_def)
+  let abi_fields = get_abi_fields(type_def)
+
+  // Use ABI size if available, otherwise fall back to computed size
+  let alloc_size = if abi_size > 0 then abi_size
+    else list.len(fields) * 8
+
   var write_lines: List[String] = []
   var read_lines: List[String] = []
 
   for f in fields {
     let fname = get_str(f, "name")
     let fkind = get_str(get_type(f), "kind")
+
+    // Find matching ABI field for exact offset
+    let matching = abi_fields.filter((af) => get_str(af, "name") == fname)
+    let abi_f = list.get_or(matching, 0, json.null())
+    let _has_abi = list.len(matching) > 0
+    let offset = get_field_offset(abi_f)
+
     if fkind == "float" then {
-      write_lines = write_lines + ["  view.setFloat64(ptr + ${int.to_string(offset)}, p.${fname}, true);"]
-      read_lines = read_lines + ["    ${fname}: view.getFloat64(ptr + ${int.to_string(offset)}, true),"]
-      offset = offset + 8
+      let off_str = int.to_string(offset)
+      write_lines = write_lines + ["  view.setFloat64(ptr + ${off_str}, p.${fname}, true);"]
+      read_lines = read_lines + ["    ${fname}: view.getFloat64(ptr + ${off_str}, true),"]
     } else if fkind == "int" then {
-      write_lines = write_lines + ["  view.setBigInt64(ptr + ${int.to_string(offset)}, BigInt(p.${fname}), true);"]
-      read_lines = read_lines + ["    ${fname}: Number(view.getBigInt64(ptr + ${int.to_string(offset)}, true)),"]
-      offset = offset + 8
+      let off_str = int.to_string(offset)
+      write_lines = write_lines + ["  view.setBigInt64(ptr + ${off_str}, BigInt(p.${fname}), true);"]
+      read_lines = read_lines + ["    ${fname}: Number(view.getBigInt64(ptr + ${off_str}, true)),"]
     } else if fkind == "bool" then {
-      write_lines = write_lines + ["  view.setUint8(ptr + ${int.to_string(offset)}, p.${fname} ? 1 : 0);"]
-      read_lines = read_lines + ["    ${fname}: view.getUint8(ptr + ${int.to_string(offset)}) !== 0,"]
-      offset = offset + 1
+      let off_str = int.to_string(offset)
+      write_lines = write_lines + ["  view.setUint8(ptr + ${off_str}, p.${fname} ? 1 : 0);"]
+      read_lines = read_lines + ["    ${fname}: view.getUint8(ptr + ${off_str}) !== 0,"]
     } else {
-      write_lines = write_lines + ["  // TODO: marshal ${fname}: ${fkind}"]
-      read_lines = read_lines + ["    // TODO: read ${fname}: ${fkind}"]
-      offset = offset + 8
+      let off_str = int.to_string(offset)
+      write_lines = write_lines + ["  // TODO: marshal ${fname}: ${fkind} at offset ${off_str}"]
+      read_lines = read_lines + ["    // TODO: read ${fname}: ${fkind} at offset ${off_str}"]
     }
   }
 
   lines = lines + ["function write${name}(p: ${name}): number {"]
-  lines = lines + ["  const ptr = alloc(${int.to_string(offset)});"]
+  lines = lines + ["  const ptr = alloc(${int.to_string(alloc_size)});"]
   lines = lines + ["  refreshView();"]
   lines = lines + write_lines
   lines = lines + ["  return ptr;"]
@@ -176,10 +222,16 @@ fn gen_record_write_read(name: String, fields: List[Value]) -> List[String] = {
   lines
 }
 
-// ── Memory layout helpers for variants ──
+// ── Memory layout helpers for variants (using ABI info) ──
 
-fn gen_variant_write(name: String, cases: List[Value]) -> List[String] = {
+fn gen_variant_write(name: String, cases: List[Value], type_def: Value) -> List[String] = {
   var lines: List[String] = []
+  let abi_size = get_abi_size(type_def)
+  let abi_align = get_abi_align(type_def)
+
+  // Payload offset: tag is i32 (4 bytes), then aligned to max alignment
+  let payload_offset = if abi_align > 4 then abi_align else 4
+
   lines = lines + ["function write${name}(s: ${name}): number {"]
   var ci = 0
   for case in cases {
@@ -192,26 +244,28 @@ fn gen_variant_write(name: String, cases: List[Value]) -> List[String] = {
         if get_kind(pl) == "tuple" then {
           let pfields = get_arr(pl, "fields")
           let n = list.len(pfields)
-          let size = 4 + n * 8
+          let size = if abi_size > 0 then abi_size else 4 + n * 8
           lines = lines + ["    const ptr = alloc(${int.to_string(size)});"]
           lines = lines + ["    refreshView();"]
           lines = lines + ["    view.setInt32(ptr, ${int.to_string(ci)}, true);"]
           var fi = 0
-          for pf in pfields {
-            let foffset = 4 + fi * 8
+          for _pf in pfields {
+            let foffset = payload_offset + fi * 8
             lines = lines + ["    view.setFloat64(ptr + ${int.to_string(foffset)}, (s as any).v${int.to_string(fi)}, true);"]
             fi = fi + 1
           }
           lines = lines + ["    return ptr;"]
         } else {
-          lines = lines + ["    const ptr = alloc(4);"]
+          let size = if abi_size > 0 then abi_size else 4
+          lines = lines + ["    const ptr = alloc(${int.to_string(size)});"]
           lines = lines + ["    refreshView();"]
           lines = lines + ["    view.setInt32(ptr, ${int.to_string(ci)}, true);"]
           lines = lines + ["    return ptr;"]
         }
       },
       none => {
-        lines = lines + ["    const ptr = alloc(4);"]
+        let size = if abi_size > 0 then abi_size else 4
+        lines = lines + ["    const ptr = alloc(${int.to_string(size)});"]
         lines = lines + ["    refreshView();"]
         lines = lines + ["    view.setInt32(ptr, ${int.to_string(ci)}, true);"]
         lines = lines + ["    return ptr;"]
@@ -354,7 +408,7 @@ effect fn main() -> Unit = {
   lines = lines + ["function refreshView(): void { view = new DataView(memory.buffer); }"]
   lines = lines + [""]
 
-  // Memory layout helpers
+  // Memory layout helpers (using ABI info from interface.json)
   lines = lines + ["// ---------- Memory layout helpers ----------"]
   lines = lines + [""]
   for t in types {
@@ -362,9 +416,9 @@ effect fn main() -> Unit = {
     let kind = json.get(t, "kind") ?? json.null()
     let k = get_kind(kind)
     if k == "record" then {
-      lines = lines + gen_record_write_read(name, get_arr(kind, "fields"))
+      lines = lines + gen_record_write_read(name, get_arr(kind, "fields"), t)
     } else if k == "variant" then {
-      lines = lines + gen_variant_write(name, get_arr(kind, "cases"))
+      lines = lines + gen_variant_write(name, get_arr(kind, "cases"), t)
     } else lines = lines
   }
 

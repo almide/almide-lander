@@ -1,9 +1,10 @@
 // generate_magnus.almd — Generate Ruby Magnus binding from Almide Module Interface
 //
-// Usage: almide run generate_magnus.almd -- interface.json mathlib.rs
+// Usage: almide run generate_magnus.almd -- interface.json source.rs
 //
-// Wraps Almide-generated Rust in `mod inner { ... }` then generates
-// Magnus wrapper types that delegate to inner:: functions.
+// Wraps Almide-generated Rust in mod inner, then generates Magnus wrapper
+// types that delegate to inner:: functions. With --repr-c, the inner types
+// are already pub, so no manual visibility changes are needed.
 
 import json
 import fs
@@ -293,7 +294,7 @@ fn gen_cargo_toml(module_name: String) -> String = {
 effect fn main() -> Unit = {
   let args = env.args()
   let iface_path = list.get(args, 0) ?? "interface.json"
-  let rust_path = list.get(args, 1) ?? "mathlib.rs"
+  let rust_path = list.get(args, 1) ?? "source.rs"
 
   let iface_text = fs.read_text(iface_path)!
   let iface = json.parse(iface_text)!
@@ -309,14 +310,11 @@ effect fn main() -> Unit = {
   lines = lines + ["use magnus::{prelude::*, function, method, Ruby, Error};"]
   lines = lines + [""]
 
-  // Wrap Almide-generated Rust in mod inner
+  // Wrap Almide-generated Rust in mod inner (types already pub from --repr-c)
   lines = lines + ["mod inner {"]
   lines = lines + ["    #![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then lines = lines
-    else if string.starts_with(line, "use std::collections") then {
-        lines = lines + ["    " + line]
-    }
     else if string.contains(line, "fn main(") then lines = lines
     else lines = lines + ["    " + line]
   }

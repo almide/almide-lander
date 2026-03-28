@@ -112,7 +112,7 @@ effect fn main() -> Unit = {
         let rust_path = if outdir != "" then "${outdir}/source.rs" else "source.rs"
         if needs_rust then {
           println("[2/3] Generating Rust source...")
-          let rust_output = process.exec("almide", [source_path, "--target", "rust"])!
+          let rust_output = process.exec("almide", [source_path, "--target", "rust", "--repr-c"])!
           fs.write(rust_path, rust_output)!
         } else {
           println("[2/3] Building WASM...")

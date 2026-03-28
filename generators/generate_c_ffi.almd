@@ -1,10 +1,10 @@
 // generate_c_ffi.almd — Generate C FFI wrapper from Almide Module Interface
 //
-// Usage: almide run generate_c_ffi.almd -- interface.json mathlib.rs
+// Usage: almide run generate_c_ffi.almd -- interface.json source.rs
 //
-// Wraps Almide-generated Rust in `mod inner { ... }` then generates
-// `extern "C"` functions that flatten record fields into scalar args
-// and expand variant params into per-case functions.
+// With --repr-c, the Almide compiler produces Rust structs/enums that already
+// have #[repr(C)] and pub visibility. This generator includes the Almide Rust
+// as-is at the top level, then appends thin extern "C" wrappers.
 
 import json
 import fs
@@ -22,19 +22,30 @@ fn get_kind(v: Value) -> String = get_str(v, "kind")
 
 fn get_type(v: Value) -> Value = json.get(v, "type") ?? json.null()
 
-// ── Type mapping ──
+// ── ABI helpers ──
 
-fn rust_type(ty: Value) -> String = {
-  let kind = get_str(ty, "kind")
-  if kind == "float" then "f64"
-  else if kind == "int" then "i64"
-  else if kind == "string" then "String"
-  else if kind == "bool" then "bool"
-  else if kind == "named" then get_str(ty, "name")
-  else if kind == "option" then "Option<${rust_type(json.get(ty, "inner") ?? json.null())}>"
-  else if kind == "list" then "Vec<${rust_type(json.get(ty, "inner") ?? json.null())}>"
-  else "/* unknown */"
+fn get_abi(v: Value) -> Value = json.get(v, "abi") ?? json.null()
+
+fn get_abi_size(v: Value) -> Int = {
+  let abi = get_abi(v)
+  let size = json.as_float(json.get(abi, "size") ?? json.from_float(0.0)) ?? 0.0
+  float.to_int(size)
 }
+
+fn get_abi_fields(v: Value) -> List[Value] =
+  get_arr(get_abi(v), "fields")
+
+fn get_field_offset(f: Value) -> Int = {
+  let offset = json.as_float(json.get(f, "offset") ?? json.from_float(0.0)) ?? 0.0
+  float.to_int(offset)
+}
+
+fn get_field_size(f: Value) -> Int = {
+  let size = json.as_float(json.get(f, "size") ?? json.from_float(0.0)) ?? 0.0
+  float.to_int(size)
+}
+
+// ── Type mapping ──
 
 fn c_scalar_type(ty: Value) -> String = {
   let kind = get_str(ty, "kind")
@@ -114,7 +125,7 @@ fn flatten_record_params(prefix: String, rec_name: String, types: List[Value]) -
   result
 }
 
-// ── Build Rust reconstruct expression (with inner:: prefix) ──
+// ── Build Rust reconstruct expression (direct, no inner:: prefix) ──
 
 fn build_reconstruct(prefix: String, rec_name: String, types: List[Value]) -> String = {
   let fields = record_fields(rec_name, types)
@@ -125,7 +136,7 @@ fn build_reconstruct(prefix: String, rec_name: String, types: List[Value]) -> St
     if is_record_type(ft, types) then "${fname}: ${build_reconstruct("${arg}_", get_str(ft, "name"), types)}"
     else "${fname}: ${arg}"
   })
-  "inner::${rec_name} { ${parts.join(", ")} }"
+  "${rec_name} { ${parts.join(", ")} }"
 }
 
 // ── Generate extern "C" functions for non-variant params ──
@@ -182,7 +193,6 @@ fn gen_c_fn_variant(fname: String, params: List[Value], ret: Value, vi: Int, vpa
           call_args = call_args + [get_str(p, "name")]
         }
       } else {
-        // Insert variant constructor with inner:: prefix
         let payload = json.get(case, "payload")
         var payload_args: List[String] = []
         match payload {
@@ -209,9 +219,9 @@ fn gen_c_fn_variant(fname: String, params: List[Value], ret: Value, vi: Int, vpa
           },
         }
         if list.len(payload_args) > 0 then {
-          call_args = call_args + ["inner::${vtype_name}::${cname}(${payload_args.join(", ")})"]
+          call_args = call_args + ["${vtype_name}::${cname}(${payload_args.join(", ")})"]
         } else {
-          call_args = call_args + ["inner::${vtype_name}::${cname}"]
+          call_args = call_args + ["${vtype_name}::${cname}"]
         }
       }
       pi = pi + 1
@@ -235,7 +245,7 @@ fn gen_c_fn_body(extern_name: String, flat: List[String], call_args: List[String
   })
 
   let args_str = call_args.join(", ")
-  let call_expr = "inner::${fname}(${args_str})"
+  let call_expr = "${fname}(${args_str})"
   let ret_kind = get_str(ret, "kind")
 
   var lines: List[String] = []
@@ -248,7 +258,7 @@ fn gen_c_fn_body(extern_name: String, flat: List[String], call_args: List[String
     lines = lines + ["}"]
   } else if is_record_type(ret, types) then {
     let ret_name = get_str(ret, "name")
-    let all_params = rust_params + ["out: *mut C${ret_name}"]
+    let all_params = rust_params + ["out: *mut ${ret_name}"]
     let params_str = all_params.join(", ")
     let fields = record_fields(ret_name, types)
     lines = lines + ["#[no_mangle]"]
@@ -299,6 +309,35 @@ fn gen_header_decl(extern_name: String, flat: List[String], ret: Value, types: L
   }
 }
 
+// ── C header struct with ABI info ──
+
+fn gen_header_struct(name: String, fields: List[Value], type_def: Value) -> List[String] = {
+  var lines: List[String] = []
+  let abi_fields = get_abi_fields(type_def)
+  let abi_size = get_abi_size(type_def)
+  if abi_size > 0 then {
+    lines = lines + ["/* size=${int.to_string(abi_size)} */"]
+  } else lines = lines
+  lines = lines + ["typedef struct {"]
+  for f in fields {
+    let fname = get_str(f, "name")
+    let ct = c_scalar_type(get_type(f))
+    let actual_ct = if ct == "" then "double" else ct
+    // Find matching ABI field for offset comment
+    let matching = abi_fields.filter((af) => get_str(af, "name") == fname)
+    let abi_f = list.get_or(matching, 0, json.null())
+    let offset = get_field_offset(abi_f)
+    if list.len(matching) > 0 then {
+      lines = lines + ["    ${actual_ct} ${fname};  /* offset=${int.to_string(offset)} */"]
+    } else {
+      lines = lines + ["    ${actual_ct} ${fname};"]
+    }
+  }
+  lines = lines + ["} ${name};"]
+  lines = lines + [""]
+  lines
+}
+
 // ── Cargo.toml ──
 
 fn gen_cargo_toml(module_name: String) -> String = {
@@ -320,7 +359,7 @@ fn gen_cargo_toml(module_name: String) -> String = {
 effect fn main() -> Unit = {
   let args = env.args()
   let iface_path = list.get(args, 0) ?? "interface.json"
-  let rust_path = list.get(args, 1) ?? "mathlib.rs"
+  let rust_path = list.get(args, 1) ?? "source.rs"
 
   let iface_text = fs.read_text(iface_path)!
   let iface = json.parse(iface_text)!
@@ -333,42 +372,19 @@ effect fn main() -> Unit = {
 
   // Build src/lib.rs
   var rs: List[String] = []
+  rs = rs + ["#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
   rs = rs + ["// AUTO-GENERATED by almide-lander — do not edit"]
   rs = rs + ["use std::ffi::CString;"]
   rs = rs + ["use std::os::raw::c_char;"]
   rs = rs + [""]
 
-  // Wrap Almide-generated Rust in mod inner
-  rs = rs + ["mod inner {"]
-  rs = rs + ["    #![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
+  // Include Almide-generated Rust directly (already has #[repr(C)] and pub)
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then rs = rs
-    else if string.starts_with(line, "use std::collections") then {
-        rs = rs + ["    " + line]
-    }
     else if string.contains(line, "fn main(") then rs = rs
-    else rs = rs + ["    " + line]
+    else rs = rs + [line]
   }
-  rs = rs + ["}"]
   rs = rs + [""]
-
-  // #[repr(C)] structs for record types (separate from inner types)
-  for t in types {
-    let kind = json.get(t, "kind") ?? json.null()
-    if get_kind(kind) == "record" then {
-      let name = get_str(t, "name")
-      let fields = get_arr(kind, "fields")
-      rs = rs + ["#[repr(C)]"]
-      rs = rs + ["pub struct C${name} {"]
-      for f in fields {
-        let ct = c_scalar_type(get_type(f))
-        let actual_ct = if ct == "" then "double" else ct
-        rs = rs + ["    pub ${get_str(f, "name")}: ${rust_from_c(actual_ct)},"]
-      }
-      rs = rs + ["}"]
-      rs = rs + [""]
-    } else rs = rs
-  }
 
   // Free-string helper
   rs = rs + ["/// Free a string returned by an almide C FFI function."]
@@ -379,19 +395,17 @@ effect fn main() -> Unit = {
   rs = rs + ["}"]
   rs = rs + [""]
 
-  // Generate extern "C" functions that delegate to inner::
+  // Generate extern "C" functions that call Almide functions directly
   for f in functions {
     let fname = get_str(f, "name")
     let params = get_arr(f, "params")
     let ret = json.get(f, "return") ?? json.null()
 
-    // Check for variant params
     let variant_params = params.filter((p) => is_variant_type(get_type(p), types))
     if list.len(variant_params) == 0 then {
       rs = rs + gen_c_fn_simple(fname, params, ret, types)
       rs = rs + [""]
     } else {
-      // Find the variant param index
       var vi = 0
       var found_vi = 0
       for p in params {
@@ -403,7 +417,7 @@ effect fn main() -> Unit = {
     }
   }
 
-  // Build C header
+  // Build C header with ABI info
   var h: List[String] = []
   h = h + ["/* AUTO-GENERATED by almide-lander — do not edit */"]
   h = h + ["#ifndef ${string.to_upper(lib_name)}_H"]
@@ -417,21 +431,14 @@ effect fn main() -> Unit = {
     if get_kind(kind) == "record" then {
       let name = get_str(t, "name")
       let fields = get_arr(kind, "fields")
-      h = h + ["typedef struct {"]
-      for f in fields {
-        let ct = c_scalar_type(get_type(f))
-        let actual_ct = if ct == "" then "double" else ct
-        h = h + ["    ${actual_ct} ${get_str(f, "name")};"]
-      }
-      h = h + ["} ${name};"]
-      h = h + [""]
+      h = h + gen_header_struct(name, fields, t)
     } else h = h
   }
 
   h = h + ["void almide_free_string(char* s);"]
   h = h + [""]
 
-  // Header declarations for each expanded function
+  // Header declarations for each function
   for f in functions {
     let fname = get_str(f, "name")
     let params = get_arr(f, "params")

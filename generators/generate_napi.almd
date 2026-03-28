@@ -1,6 +1,11 @@
 // generate_napi.almd — Generate napi-rs Node.js addon from Almide Module Interface
 //
-// Usage: almide run generate_napi.almd -- interface.json mathlib.rs
+// Usage: almide run generate_napi.almd -- interface.json source.rs
+//
+// napi-rs requires its own #[napi(object)] and #[napi] annotations that
+// cannot go on the Almide-generated types directly. We keep mod inner but
+// the types inside are already pub (from --repr-c), so no manual pub-adding
+// is needed.
 
 import json
 import fs
@@ -201,7 +206,7 @@ fn gen_fn_lines(f: Value, types: List[Value]) -> List[String] = {
 
   let params_str = param_strs.join(", ")
   let args_str = call_args.join(", ")
-  let ret_kind = get_kind(ret)
+  let _ret_kind = get_kind(ret)
 
   // Return type: wrap named types back to napi wrappers
   let ret_type = if is_record_type(ret, types) then get_str(ret, "name")
@@ -355,7 +360,7 @@ fn gen_dts_lines(types: List[Value], functions: List[Value]) -> List[String] = {
 effect fn main() -> Unit = {
   let args = env.args()
   let iface_path = list.get(args, 0) ?? "interface.json"
-  let rust_path = list.get(args, 1) ?? "mathlib.rs"
+  let rust_path = list.get(args, 1) ?? "source.rs"
 
   let iface_text = fs.read_text(iface_path)!
   let iface = json.parse(iface_text)!
@@ -371,15 +376,12 @@ effect fn main() -> Unit = {
   lines = lines + ["use napi_derive::napi;"]
   lines = lines + [""]
 
-  // Wrap Almide-generated Rust in mod inner to avoid name collisions
+  // Wrap Almide-generated Rust in mod inner (needed for napi annotation isolation)
+  // Types are already pub from --repr-c, so no manual pub-adding needed
   lines = lines + ["#[allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
   lines = lines + ["pub(crate) mod inner {"]
-  lines = lines + ["    pub(crate) use super::*;"]
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then lines = lines
-    else if string.starts_with(line, "use std::collections") then {
-        lines = lines + ["    " + line]
-    }
     else if string.contains(line, "fn main(") then lines = lines
     else lines = lines + ["    " + line]
   }
