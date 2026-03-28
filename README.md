@@ -44,11 +44,13 @@
 
 ## What is this?
 
-Write a library in Almide. Run one command. Use it from Python, Go, Swift, Ruby, C#, Dart, Kotlin, Java, C, Zig, Nim, Elixir, PHP, or Lua.
+Write a library in Almide. Run one command. Use it from 20 languages.
 
 ```bash
-cd almide-lander
 almide run src/main.almd -- --lang python mylib.almd
+almide run src/main.almd -- --lang python,go,swift mylib.almd   # multiple at once
+almide run src/main.almd -- --list                               # show all 20
+almide run src/main.almd -- --dry-run --lang ruby mylib.almd     # preview
 ```
 
 No runtime. No VM. Almide disappears — only a native shared library and a pure language wrapper remain.
@@ -58,32 +60,21 @@ No runtime. No VM. Almide disappears — only a native shared library and a pure
 ```
 mylib.almd
     │
-    ▼
-almide run src/main.almd -- --lang python mylib.almd
-    │
-    ├─ [1/4] almide compile --json    → interface.json
-    ├─ [2/4] almide --target rust     → source.rs
-    ├─ [3/4] bindgen.scaffolding.generate()  → src/lib.rs → cargo build → .dylib
-    └─ [4/4] bindgen.bindings.python.generate()  → almide_mathlib.py
-    │
-    ▼
-python3 -c "from almide_mathlib import Point, distance; print(distance(Point(x=0,y=0), Point(x=3,y=4)))"
-# → 5.0
+    ├─ [1/N] almide compile --json             → interface.json
+    ├─ [2/N] almide --target rust --repr-c     → source.rs + cargo build → .so/.dylib
+    └─ [3/N] bindgen.bindings.<lang>.generate() → almide_mylib.py / .go / .swift / ...
 ```
 
 ## Architecture
 
-almide-lander is a CLI tool. The binding generation logic lives in [almide-bindgen](https://github.com/almide/almide-bindgen), which is imported as an Almide library.
-
 ```
-almide-bindgen (library)              almide-lander (this repo, CLI)
-├── src/mod.almd                      ├── almide.toml → depends on bindgen
-├── src/scaffolding.almd              └── src/main.almd → import bindgen
-└── src/bindings/ (14 languages)            calls bindgen.scaffolding.generate()
-                                            calls bindgen.bindings.python.generate()
+almide-bindgen (library, 20 generators)     almide-lander (this repo, CLI)
+├── src/mod.almd                            ├── almide.toml → depends on bindgen
+├── src/scaffolding.almd                    ├── src/main.almd → import bindgen
+└── src/bindings/ (20 .almd files)          └── test/ (51 tests)
 ```
 
-Everything is written in Almide. No Python, no JavaScript, no external tool dependencies.
+Everything is written in Almide. No Python, no external tool dependencies.
 
 ## Demo
 
@@ -121,6 +112,21 @@ d := almide.Distance(almide.Point{X: 0, Y: 0}, almide.Point{X: 3, Y: 4})  // 5.0
 **Swift**
 ```swift
 let d = Mathlib.distance(Point(x: 0, y: 0), Point(x: 3, y: 4))  // 5.0
+```
+
+**Ruby**
+```ruby
+d = AlmideMathlib.distance(AlmideMathlib::Point.new(x: 0, y: 0), AlmideMathlib::Point.new(x: 3, y: 4))
+```
+
+**C#**
+```csharp
+var d = Bridge.Distance(new Point(0, 0), new Point(3, 4));  // 5.0
+```
+
+**C**
+```c
+double d = almide_distance(0, 0, 3, 4);  // 5.0
 ```
 
 ## License
