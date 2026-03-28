@@ -19,7 +19,12 @@ fn lang_ext(lang: String) -> String = {
   else if lang == "elixir" then "ex"
   else if lang == "php" then "php"
   else if lang == "lua" then "lua"
-  else "txt"
+  else if lang == "cpp" then "hpp"
+  else if lang == "rust" then "rs"
+  else if lang == "javascript" then "js"
+  else if lang == "scala" then "scala"
+  else if lang == "julia" then "jl"
+  else if lang == "powershell" then "ps1"  else "txt"
 }
 
 test "lang_ext python" { assert_eq(lang_ext("python"), "py") }
@@ -144,7 +149,7 @@ fn is_supported(lang: String) -> Bool = {
 
 test "is_supported python" { assert_eq(is_supported("python"), true) }
 test "is_supported go" { assert_eq(is_supported("go"), true) }
-test "is_supported rust" { assert_eq(is_supported("rust"), false) }
+test "is_supported rust" { assert_eq(is_supported("rust"), true) }
 test "is_supported empty" { assert_eq(is_supported(""), false) }
 
 // ── bindgen.supported_languages consistency ──
@@ -158,8 +163,8 @@ test "all lang_ext languages are supported" {
   }
 }
 
-test "supported_languages count is 14" {
-  assert_eq(list.len(bindgen.supported_languages()), 14)
+test "supported_languages count is 20" {
+  assert_eq(list.len(bindgen.supported_languages()), 20)
 }
 
 // ── bindgen.version ──
@@ -206,3 +211,18 @@ test "step increment" {
   assert_eq(step, 4)
   assert_eq(int.to_string(step), "4")
 }
+
+// ── New languages (6 additions) ──
+
+test "lang_ext cpp" { assert_eq(lang_ext("cpp"), "hpp") }
+test "lang_ext rust" { assert_eq(lang_ext("rust"), "rs") }
+test "lang_ext javascript" { assert_eq(lang_ext("javascript"), "js") }
+test "lang_ext scala" { assert_eq(lang_ext("scala"), "scala") }
+test "lang_ext julia" { assert_eq(lang_ext("julia"), "jl") }
+test "lang_ext powershell" { assert_eq(lang_ext("powershell"), "ps1") }
+
+test "is_supported cpp" { assert_eq(is_supported("cpp"), true) }
+test "is_supported javascript" { assert_eq(is_supported("javascript"), true) }
+test "is_supported scala" { assert_eq(is_supported("scala"), true) }
+test "is_supported julia" { assert_eq(is_supported("julia"), true) }
+test "is_supported powershell" { assert_eq(is_supported("powershell"), true) }

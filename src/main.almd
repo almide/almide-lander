@@ -68,6 +68,12 @@ fn lang_ext(lang: String) -> String = {
   else if lang == "elixir" then "ex"
   else if lang == "php" then "php"
   else if lang == "lua" then "lua"
+  else if lang == "cpp" then "hpp"
+  else if lang == "rust" then "rs"
+  else if lang == "javascript" or lang == "js" then "js"
+  else if lang == "scala" then "scala"
+  else if lang == "julia" then "jl"
+  else if lang == "powershell" or lang == "ps" then "ps1"
   else "txt"
 }
 
@@ -88,6 +94,12 @@ fn generate_binding(lang: String, iface_json: String) -> String = {
   else if lang == "elixir" then bindgen.bindings.elixir.generate(iface_json)
   else if lang == "php" then bindgen.bindings.php.generate(iface_json)
   else if lang == "lua" then bindgen.bindings.lua.generate(iface_json)
+  else if lang == "cpp" then bindgen.bindings.cpp.generate(iface_json)
+  else if lang == "rust" then bindgen.bindings.rust.generate(iface_json)
+  else if lang == "javascript" or lang == "js" then bindgen.bindings.javascript.generate(iface_json)
+  else if lang == "scala" then bindgen.bindings.scala.generate(iface_json)
+  else if lang == "julia" then bindgen.bindings.julia.generate(iface_json)
+  else if lang == "powershell" or lang == "ps" then bindgen.bindings.powershell.generate(iface_json)
   else ""
 }
 
