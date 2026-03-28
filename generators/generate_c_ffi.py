@@ -10,7 +10,6 @@ Patterns:
 import json
 import argparse
 import os
-import sys
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -34,45 +33,19 @@ out_dir = args.out_dir
 # ---------------------------------------------------------------------------
 # Type helpers
 # ---------------------------------------------------------------------------
-# Resolve type defs from interface for lookup
 type_defs = {t["name"]: t for t in iface["types"]}
 
-
-def rust_type(tref):
-    k = tref["kind"]
-    if k == "float":
-        return "f64"
-    if k == "int":
-        return "i64"
-    if k == "string":
-        return "String"
-    if k == "bool":
-        return "bool"
-    if k == "named":
-        return tref["name"]
-    if k == "option":
-        return f"Option<{rust_type(tref['inner'])}>"
-    if k == "list":
-        return f"Vec<{rust_type(tref['inner'])}>"
-    return "/* unknown */"
+C_TYPE_MAP = {"float": "double", "int": "int64_t", "bool": "int", "string": "const char*"}
+RUST_FROM_C = {"double": "f64", "int64_t": "i64", "int": "i32", "const char*": "*const c_char"}
 
 
 def c_scalar_type(tref):
-    """Map Almide TypeRef to C type for scalars."""
-    k = tref["kind"]
-    if k == "float":
-        return "double"
-    if k == "int":
-        return "int64_t"
-    if k == "bool":
-        return "int"
-    if k == "string":
-        return "const char*"
-    return None  # not a scalar
+    """Map Almide TypeRef to C type for scalars, or None if not scalar."""
+    return C_TYPE_MAP.get(tref["kind"])
 
 
 def is_scalar(tref):
-    return tref["kind"] in ("float", "int", "bool", "string")
+    return tref["kind"] in C_TYPE_MAP
 
 
 def is_record(tref):
@@ -91,38 +64,168 @@ def variant_cases(name):
     return type_defs[name]["kind"]["cases"]
 
 
-def c_type_for_return(tref):
-    """C return type. Records return void (out-pointer), strings return const char*."""
-    if tref["kind"] == "string":
-        return "const char*"
-    if is_record(tref):
-        return "void"
-    return c_scalar_type(tref)
-
-
-def c_struct_name(name):
-    return name
-
-
-# ---------------------------------------------------------------------------
-# Flatten record params into scalar args
-# ---------------------------------------------------------------------------
 def flatten_record_params(prefix, rec_name):
-    """Return list of (c_arg_name, c_type, rust_field_name) for a record flattened into scalars."""
+    """Flatten record into (c_arg_name, c_type) pairs for scalar fields."""
     result = []
     for f in record_fields(rec_name):
         ft = f["type"]
         arg_name = f"{prefix}{f['name']}"
         if is_scalar(ft):
-            result.append((arg_name, c_scalar_type(ft), f["name"]))
+            result.append((arg_name, c_scalar_type(ft)))
         elif is_record(ft):
-            # Nested record: recurse
             result.extend(flatten_record_params(f"{arg_name}_", ft["name"]))
         else:
-            # Fallback: opaque
-            result.append((arg_name, "void*", f["name"]))
+            result.append((arg_name, "void*"))
     return result
 
+
+def build_reconstruct_record(prefix, rec_name):
+    """Rust expression reconstructing an Almide record from flat C args."""
+    parts = []
+    for f in record_fields(rec_name):
+        ft = f["type"]
+        arg = f"{prefix}{f['name']}"
+        if is_record(ft):
+            inner = build_reconstruct_record(f"{arg}_", ft["name"])
+            parts.append(f"{f['name']}: {inner}")
+        else:
+            parts.append(f"{f['name']}: {arg}")
+    return f"{rec_name} {{ {', '.join(parts)} }}"
+
+
+# ---------------------------------------------------------------------------
+# Expand each interface function into one or more extern "C" signatures.
+#
+# If a function takes a variant param, it is flattened: one extern fn per case.
+# Otherwise a single extern fn is produced.
+# Returns list of dicts: {extern_name, flat_params:[(name, c_type)], ret, call_str}
+# ---------------------------------------------------------------------------
+def expand_function(fn_def):
+    fname = fn_def["name"]
+    ret = fn_def["return"]
+    variant_params = [(i, p) for i, p in enumerate(fn_def["params"]) if is_variant(p["type"])]
+
+    if not variant_params:
+        flat = []
+        call_args = []
+        for p in fn_def["params"]:
+            pt = p["type"]
+            if is_record(pt):
+                flat.extend(flatten_record_params(p["name"], pt["name"]))
+                call_args.append(build_reconstruct_record(p["name"], pt["name"]))
+            elif is_scalar(pt):
+                flat.append((p["name"], c_scalar_type(pt)))
+                call_args.append(p["name"])
+        return [{"extern_name": f"almide_{fname}", "flat_params": flat, "ret": ret,
+                 "call_str": f"{fname}({', '.join(call_args)})"}]
+
+    # Variant expansion: one fn per case
+    assert len(variant_params) == 1, "Multiple variant params not yet supported"
+    vi, vparam = variant_params[0]
+    vtype_name = vparam["type"]["name"]
+    cases = variant_cases(vtype_name)
+    other_params = [(i, p) for i, p in enumerate(fn_def["params"]) if i != vi]
+
+    results = []
+    for case in cases:
+        case_lower = case["name"].lower()
+        flat = []
+        call_args_indexed = {}  # position -> call_arg string
+
+        for oi, op in other_params:
+            pt = op["type"]
+            if is_record(pt):
+                flat.extend(flatten_record_params(op["name"], pt["name"]))
+                call_args_indexed[oi] = build_reconstruct_record(op["name"], pt["name"])
+            elif is_scalar(pt):
+                flat.append((op["name"], c_scalar_type(pt)))
+                call_args_indexed[oi] = op["name"]
+
+        payload_args = []
+        if case.get("payload") and case["payload"]["kind"] == "tuple":
+            for fi, ft in enumerate(case["payload"]["fields"]):
+                ct = c_scalar_type(ft) or "double"
+                arg_name = f"v{fi}"
+                flat.append((arg_name, ct))
+                payload_args.append(arg_name)
+
+        if payload_args:
+            variant_expr = f"{vtype_name}::{case['name']}({', '.join(payload_args)})"
+        else:
+            variant_expr = f"{vtype_name}::{case['name']}"
+        call_args_indexed[vi] = variant_expr
+
+        call_args = [call_args_indexed[i] for i in sorted(call_args_indexed)]
+        results.append({"extern_name": f"almide_{fname}_{case_lower}", "flat_params": flat,
+                         "ret": ret, "call_str": f"{fname}({', '.join(call_args)})"})
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Emit Rust wrapper for a single expanded function
+# ---------------------------------------------------------------------------
+def emit_rust_fn(spec):
+    lines = []
+    params = []
+    for name, ct in spec["flat_params"]:
+        rtype = RUST_FROM_C.get(ct, "f64")
+        params.append(f"{name}: {rtype}")
+
+    ret = spec["ret"]
+    if is_record(ret):
+        params.append(f"out: *mut C{ret['name']}")
+
+    params_str = ", ".join(params)
+
+    if ret["kind"] == "string":
+        lines.append(f"#[no_mangle]")
+        lines.append(f"pub extern \"C\" fn {spec['extern_name']}({params_str}) -> *const c_char {{")
+        lines.append(f"    let s = {spec['call_str']};")
+        lines.append(f"    CString::new(s).unwrap().into_raw() as *const c_char")
+        lines.append(f"}}")
+    elif is_record(ret):
+        lines.append(f"#[no_mangle]")
+        lines.append(f"pub extern \"C\" fn {spec['extern_name']}({params_str}) {{")
+        lines.append(f"    let r = {spec['call_str']};")
+        lines.append(f"    unsafe {{")
+        for f in record_fields(ret["name"]):
+            lines.append(f"        (*out).{f['name']} = r.{f['name']};")
+        lines.append(f"    }}")
+        lines.append(f"}}")
+    else:
+        rtype = RUST_FROM_C.get(c_scalar_type(ret), "f64")
+        lines.append(f"#[no_mangle]")
+        lines.append(f"pub extern \"C\" fn {spec['extern_name']}({params_str}) -> {rtype} {{")
+        lines.append(f"    {spec['call_str']}")
+        lines.append(f"}}")
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Emit C header declaration for a single expanded function
+# ---------------------------------------------------------------------------
+def emit_header_decl(spec):
+    ret = spec["ret"]
+    c_params = [f"{ct} {name}" for name, ct in spec["flat_params"]]
+
+    if is_record(ret):
+        c_ret = "void"
+        c_params.append(f"{ret['name']}* out")
+    elif ret["kind"] == "string":
+        c_ret = "const char*"
+    else:
+        c_ret = c_scalar_type(ret) or "double"
+
+    params_str = ", ".join(c_params) if c_params else "void"
+    return f"{c_ret} {spec['extern_name']}({params_str});"
+
+
+# ---------------------------------------------------------------------------
+# Build all expanded specs
+# ---------------------------------------------------------------------------
+all_specs = []
+for fn_def in iface["functions"]:
+    all_specs.extend(expand_function(fn_def))
 
 # ---------------------------------------------------------------------------
 # Generate src/lib.rs
@@ -148,205 +251,33 @@ rs.append("")
 for t in iface["types"]:
     if t["kind"]["kind"] == "record":
         name = t["name"]
-        rs.append(f"#[repr(C)]")
+        rs.append("#[repr(C)]")
         rs.append(f"pub struct C{name} {{")
         for f in t["kind"]["fields"]:
-            ct = c_scalar_type(f["type"])
-            if ct is None:
-                ct = "f64"  # fallback
-            # Map C types back to Rust repr(C) types
-            rust_repr = {"double": "f64", "int64_t": "i64", "int": "i32"}.get(ct, "f64")
-            rs.append(f"    pub {f['name']}: {rust_repr},")
+            ct = c_scalar_type(f["type"]) or "double"
+            rtype = RUST_FROM_C.get(ct, "f64")
+            rs.append(f"    pub {f['name']}: {rtype},")
         rs.append("}")
         rs.append("")
 
 # Free-string helper
 rs.append("/// Free a string returned by an almide C FFI function.")
 rs.append("#[no_mangle]")
-rs.append("pub extern \"C\" fn almide_free_string(s: *mut c_char) {")
+rs.append('pub extern "C" fn almide_free_string(s: *mut c_char) {')
 rs.append("    if s.is_null() { return; }")
 rs.append("    unsafe { drop(CString::from_raw(s)); }")
 rs.append("}")
 rs.append("")
 
-
-def build_reconstruct_record(prefix, rec_name):
-    """Build Rust expression that reconstructs an Almide record from flat C args."""
-    parts = []
-    for f in record_fields(rec_name):
-        ft = f["type"]
-        arg = f"{prefix}{f['name']}"
-        if is_scalar(ft):
-            parts.append(f"{f['name']}: {arg}")
-        elif is_record(ft):
-            inner = build_reconstruct_record(f"{arg}_", ft["name"])
-            parts.append(f"{f['name']}: {inner}")
-        else:
-            parts.append(f"{f['name']}: {arg}")
-    return f"{rec_name} {{ {', '.join(parts)} }}"
-
-
-# Generate extern "C" wrapper functions
-for fn_def in iface["functions"]:
-    fname = fn_def["name"]
-    ret = fn_def["return"]
-
-    # Check if any param is a variant (need flattening per case)
-    variant_params = [(i, p) for i, p in enumerate(fn_def["params"]) if is_variant(p["type"])]
-
-    if variant_params:
-        # Generate one extern "C" fn per variant case combination
-        # For simplicity: support one variant param (covers the common case)
-        assert len(variant_params) == 1, "Multiple variant params not yet supported"
-        vi, vparam = variant_params[0]
-        vtype_name = vparam["type"]["name"]
-        cases = variant_cases(vtype_name)
-
-        # Non-variant params
-        other_params = [(i, p) for i, p in enumerate(fn_def["params"]) if i != vi]
-
-        for case in cases:
-            case_name = case["name"]
-            case_lower = case_name.lower()
-            extern_name = f"almide_{fname}_{case_lower}"
-
-            # Build parameter list
-            c_params = []
-            rust_param_strs = []
-
-            # Non-variant params (before and after the variant)
-            for oi, op in other_params:
-                pt = op["type"]
-                if is_record(pt):
-                    flat = flatten_record_params(f"{op['name']}", pt["name"])
-                    for arg_name, ct, _ in flat:
-                        rtype = {"double": "f64", "int64_t": "i64", "int": "i32"}.get(ct, "f64")
-                        rust_param_strs.append(f"{arg_name}: {rtype}")
-                elif is_scalar(pt):
-                    rtype = {"double": "f64", "int64_t": "i64", "int": "i32", "const char*": "*const c_char"}.get(c_scalar_type(pt), "f64")
-                    rust_param_strs.append(f"{op['name']}: {rtype}")
-
-            # Variant case payload fields
-            payload_args = []
-            if case.get("payload"):
-                pk = case["payload"]["kind"]
-                if pk == "tuple":
-                    for fi, ft in enumerate(case["payload"]["fields"]):
-                        arg_name = f"v{fi}" if len(case["payload"]["fields"]) > 1 else "v0"
-                        rtype = {"double": "f64", "int64_t": "i64", "int": "i32"}.get(c_scalar_type(ft), "f64")
-                        rust_param_strs.append(f"{arg_name}: {rtype}")
-                        payload_args.append(arg_name)
-
-            # Out-pointer for record returns
-            if is_record(ret):
-                rust_param_strs.append(f"out: *mut C{ret['name']}")
-
-            params_str = ", ".join(rust_param_strs)
-
-            # Build call to the original Almide fn
-            call_args = []
-            for oi, op in other_params:
-                pt = op["type"]
-                if is_record(pt):
-                    call_args.append(build_reconstruct_record(op["name"], pt["name"]))
-                else:
-                    call_args.append(op["name"])
-
-            # Construct variant value
-            if payload_args:
-                variant_expr = f"{vtype_name}::{case_name}({', '.join(payload_args)})"
-            else:
-                variant_expr = f"{vtype_name}::{case_name}"
-
-            # Insert variant arg at original position
-            call_args.insert(vi, variant_expr)
-            call_str = f"{fname}({', '.join(call_args)})"
-
-            # Return type handling
-            if ret["kind"] == "string":
-                rs.append(f"#[no_mangle]")
-                rs.append(f"pub extern \"C\" fn {extern_name}({params_str}) -> *const c_char {{")
-                rs.append(f"    let s = {call_str};")
-                rs.append(f"    CString::new(s).unwrap().into_raw() as *const c_char")
-                rs.append(f"}}")
-            elif is_record(ret):
-                rs.append(f"#[no_mangle]")
-                rs.append(f"pub extern \"C\" fn {extern_name}({params_str}) {{")
-                rs.append(f"    let r = {call_str};")
-                rs.append(f"    unsafe {{")
-                for f in record_fields(ret["name"]):
-                    rs.append(f"        (*out).{f['name']} = r.{f['name']};")
-                rs.append(f"    }}")
-                rs.append(f"}}")
-            else:
-                c_ret = c_scalar_type(ret)
-                rust_ret = {"double": "f64", "int64_t": "i64", "int": "i32"}.get(c_ret, "f64")
-                rs.append(f"#[no_mangle]")
-                rs.append(f"pub extern \"C\" fn {extern_name}({params_str}) -> {rust_ret} {{")
-                rs.append(f"    {call_str}")
-                rs.append(f"}}")
-            rs.append("")
-
-    else:
-        # No variant params: generate a single extern "C" fn
-        extern_name = f"almide_{fname}"
-
-        rust_param_strs = []
-        for p in fn_def["params"]:
-            pt = p["type"]
-            if is_record(pt):
-                flat = flatten_record_params(p["name"], pt["name"])
-                for arg_name, ct, _ in flat:
-                    rtype = {"double": "f64", "int64_t": "i64", "int": "i32"}.get(ct, "f64")
-                    rust_param_strs.append(f"{arg_name}: {rtype}")
-            elif is_scalar(pt):
-                rtype = {"double": "f64", "int64_t": "i64", "int": "i32", "const char*": "*const c_char"}.get(c_scalar_type(pt), "f64")
-                rust_param_strs.append(f"{p['name']}: {rtype}")
-
-        # Out-pointer for record returns
-        if is_record(ret):
-            rust_param_strs.append(f"out: *mut C{ret['name']}")
-
-        params_str = ", ".join(rust_param_strs)
-
-        # Build call
-        call_args = []
-        for p in fn_def["params"]:
-            pt = p["type"]
-            if is_record(pt):
-                call_args.append(build_reconstruct_record(p["name"], pt["name"]))
-            else:
-                call_args.append(p["name"])
-        call_str = f"{fname}({', '.join(call_args)})"
-
-        if ret["kind"] == "string":
-            rs.append(f"#[no_mangle]")
-            rs.append(f"pub extern \"C\" fn {extern_name}({params_str}) -> *const c_char {{")
-            rs.append(f"    let s = {call_str};")
-            rs.append(f"    CString::new(s).unwrap().into_raw() as *const c_char")
-            rs.append(f"}}")
-        elif is_record(ret):
-            rs.append(f"#[no_mangle]")
-            rs.append(f"pub extern \"C\" fn {extern_name}({params_str}) {{")
-            rs.append(f"    let r = {call_str};")
-            rs.append(f"    unsafe {{")
-            for f in record_fields(ret["name"]):
-                rs.append(f"        (*out).{f['name']} = r.{f['name']};")
-            rs.append(f"    }}")
-            rs.append(f"}}")
-        else:
-            c_ret = c_scalar_type(ret)
-            rust_ret = {"double": "f64", "int64_t": "i64", "int": "i32"}.get(c_ret, "f64")
-            rs.append(f"#[no_mangle]")
-            rs.append(f"pub extern \"C\" fn {extern_name}({params_str}) -> {rust_ret} {{")
-            rs.append(f"    {call_str}")
-            rs.append(f"}}")
-        rs.append("")
+for spec in all_specs:
+    rs.extend(emit_rust_fn(spec))
+    rs.append("")
 
 # ---------------------------------------------------------------------------
 # Generate Cargo.toml
 # ---------------------------------------------------------------------------
-cargo = f"""[package]
+cargo = f"""\
+[package]
 name = "almide-{module}-c"
 version = "0.1.0"
 edition = "2021"
@@ -360,85 +291,28 @@ name = "{lib_name}"
 # Generate C header
 # ---------------------------------------------------------------------------
 h = []
-h.append(f"/* AUTO-GENERATED by generate_c_ffi.py -- do not edit */")
+h.append("/* AUTO-GENERATED by generate_c_ffi.py -- do not edit */")
 h.append(f"#ifndef {lib_name.upper()}_H")
 h.append(f"#define {lib_name.upper()}_H")
 h.append("")
 h.append("#include <stdint.h>")
 h.append("")
 
-# Struct declarations for record types
 for t in iface["types"]:
     if t["kind"]["kind"] == "record":
         name = t["name"]
-        h.append(f"typedef struct {{")
+        h.append("typedef struct {")
         for f in t["kind"]["fields"]:
             ct = c_scalar_type(f["type"]) or "double"
             h.append(f"    {ct} {f['name']};")
         h.append(f"}} {name};")
         h.append("")
 
-# Free-string
 h.append("void almide_free_string(char* s);")
 h.append("")
 
-# Function declarations
-for fn_def in iface["functions"]:
-    fname = fn_def["name"]
-    ret = fn_def["return"]
-
-    variant_params = [(i, p) for i, p in enumerate(fn_def["params"]) if is_variant(p["type"])]
-
-    if variant_params:
-        vi, vparam = variant_params[0]
-        vtype_name = vparam["type"]["name"]
-        cases = variant_cases(vtype_name)
-        other_params = [(i, p) for i, p in enumerate(fn_def["params"]) if i != vi]
-
-        for case in cases:
-            case_name = case["name"]
-            case_lower = case_name.lower()
-            extern_name = f"almide_{fname}_{case_lower}"
-
-            c_params = []
-            for oi, op in other_params:
-                pt = op["type"]
-                if is_record(pt):
-                    flat = flatten_record_params(op["name"], pt["name"])
-                    for arg_name, ct, _ in flat:
-                        c_params.append(f"{ct} {arg_name}")
-                elif is_scalar(pt):
-                    c_params.append(f"{c_scalar_type(pt)} {op['name']}")
-
-            if case.get("payload"):
-                if case["payload"]["kind"] == "tuple":
-                    for fi, ft in enumerate(case["payload"]["fields"]):
-                        ct = c_scalar_type(ft) or "double"
-                        arg_name = f"v{fi}" if len(case["payload"]["fields"]) > 1 else "v0"
-                        c_params.append(f"{ct} {arg_name}")
-
-            c_ret = c_type_for_return(ret) or "double"
-            if is_record(ret):
-                c_params.append(f"{ret['name']}* out")
-            params_str = ", ".join(c_params) if c_params else "void"
-            h.append(f"{c_ret} {extern_name}({params_str});")
-    else:
-        extern_name = f"almide_{fname}"
-        c_params = []
-        for p in fn_def["params"]:
-            pt = p["type"]
-            if is_record(pt):
-                flat = flatten_record_params(p["name"], pt["name"])
-                for arg_name, ct, _ in flat:
-                    c_params.append(f"{ct} {arg_name}")
-            elif is_scalar(pt):
-                c_params.append(f"{c_scalar_type(pt)} {p['name']}")
-
-        c_ret = c_type_for_return(ret) or "double"
-        if is_record(ret):
-            c_params.append(f"{ret['name']}* out")
-        params_str = ", ".join(c_params) if c_params else "void"
-        h.append(f"{c_ret} {extern_name}({params_str});")
+for spec in all_specs:
+    h.append(emit_header_decl(spec))
 
 h.append("")
 h.append(f"#endif /* {lib_name.upper()}_H */")
