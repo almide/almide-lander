@@ -71,6 +71,24 @@ fn gen_record_field_lines(name: String, fields: List[Value]) -> List[String] = {
   let fmt_str = fields.map((f) => "${get_str(f, "name")}={}").join(", ")
   let fmt_args = fields.map((f) => "self.${get_str(f, "name")}").join(", ")
   lines = lines + ["    fn __repr__(&self) -> String { format!(\"${name}(${fmt_str})\", ${fmt_args}) }"]
+  // __eq__: value equality
+  let eq_parts = fields.map((f) => "self.${get_str(f, "name")} == other.${get_str(f, "name")}").join(" && ")
+  lines = lines + ["    fn __eq__(&self, other: &Self) -> bool { ${eq_parts} }"]
+  // __hash__: based on all fields
+  lines = lines + ["    fn __hash__(&self) -> u64 {"]
+  lines = lines + ["        use std::hash::{Hash, Hasher};"]
+  lines = lines + ["        let mut h = std::collections::hash_map::DefaultHasher::new();"]
+  for f in fields {
+    let fname = get_str(f, "name")
+    let fkind = get_str(get_type(f), "kind")
+    if fkind == "float" then {
+      lines = lines + ["        self.${fname}.to_bits().hash(&mut h);"]
+    } else {
+      lines = lines + ["        self.${fname}.hash(&mut h);"]
+    }
+  }
+  lines = lines + ["        h.finish()"]
+  lines = lines + ["    }"]
   lines = lines + ["}"]
 
   // From conversions
@@ -123,6 +141,10 @@ fn gen_variant_lines(name: String, cases: List[Value]) -> List[String] = {
       },
     }
   }
+  // __repr__: use Debug format of inner enum
+  lines = lines + ["    fn __repr__(&self) -> String { format!(\"{:?}\", self.inner) }"]
+  // __eq__: delegate to inner PartialEq
+  lines = lines + ["    fn __eq__(&self, other: &Self) -> bool { self.inner == other.inner }"]
   lines = lines + ["}"]
   lines = lines + ["impl From<&Py${name}> for ${name} {"]
   lines = lines + ["    fn from(p: &Py${name}) -> Self { p.inner.clone() }"]
@@ -198,8 +220,24 @@ fn gen_pyi_lines(iface: Value) -> List[String] = {
       if doc != "" then lines = lines + ["    \"\"\"${doc}\"\"\""] else lines = lines
       for case in cases {
         let cname = get_str(case, "name").to_lower()
+        let payload = json.get(case, "payload")
+        let case_params = match payload {
+          some(pl) => {
+            if get_kind(pl) == "tuple" then {
+              let pfields = get_arr(pl, "fields")
+              var indexed: List[String] = []
+              var idx = 0
+              for pf in pfields {
+                indexed = indexed + ["v${int.to_string(idx)}: ${py_type(pf)}"]
+                idx = idx + 1
+              }
+              indexed.join(", ")
+            } else ""
+          },
+          none => "",
+        }
         lines = lines + ["    @staticmethod"]
-        lines = lines + ["    def ${cname}(...) -> ${name}: ..."]
+        lines = lines + ["    def ${cname}(${case_params}) -> ${name}: ..."]
       }
       lines = lines + [""]
     } else lines = lines
