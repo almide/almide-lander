@@ -1,0 +1,12 @@
+{
+  "name": "almide-mathlib",
+  "version": "0.1.0",
+  "main": "index.js",
+  "napi": {
+    "name": "almide-mathlib",
+    "triples": {}
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2"
+  }
+}

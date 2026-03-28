@@ -1,0 +1,11 @@
+target/
+node_modules/
+.venv/
+__pycache__/
+*.so
+*.dylib
+*.node
+*.whl
+*.egg-info/
+Cargo.lock
+bindings/
