@@ -1,6 +1,11 @@
 // generate_uniffi.almd — Generate UniFFI-annotated Rust crate from Almide Module Interface
 //
 // Usage: almide run generate_uniffi.almd -- interface.json mathlib.rs
+//
+// UniFFI uses proc macros that annotate the actual types.  We wrap the
+// Almide-generated Rust in `mod inner` and define UniFFI-annotated types
+// in the outer scope, with From impls to convert between the two.
+// Exported functions delegate to inner:: with type conversions.
 
 import json
 import fs
@@ -32,12 +37,32 @@ fn rust_type(ty: Value) -> String = {
   else "/* unknown */"
 }
 
+// ── Type category helpers ──
+
+fn is_record_type(ty: Value, types: List[Value]) -> Bool = {
+  if get_str(ty, "kind") != "named" then false
+  else {
+    let tname = get_str(ty, "name")
+    let matches = types.filter((t) => get_str(t, "name") == tname and get_kind(json.get(t, "kind") ?? json.null()) == "record")
+    list.len(matches) > 0
+  }
+}
+
+fn is_variant_type(ty: Value, types: List[Value]) -> Bool = {
+  if get_str(ty, "kind") != "named" then false
+  else {
+    let tname = get_str(ty, "name")
+    let matches = types.filter((t) => get_str(t, "name") == tname and get_kind(json.get(t, "kind") ?? json.null()) == "variant")
+    list.len(matches) > 0
+  }
+}
+
 // ── Record codegen ──
 
 fn gen_record_lines(name: String, doc: String, fields: List[Value]) -> List[String] = {
   var lines: List[String] = []
   if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
-  lines = lines + ["#[derive(Debug, Clone, uniffi::Record)]"]
+  lines = lines + ["#[derive(Debug, Clone, PartialEq, uniffi::Record)]"]
   lines = lines + ["pub struct ${name} {"]
   for f in fields {
     let fname = get_str(f, "name")
@@ -54,7 +79,7 @@ fn gen_record_lines(name: String, doc: String, fields: List[Value]) -> List[Stri
 fn gen_variant_lines(name: String, doc: String, cases: List[Value]) -> List[String] = {
   var lines: List[String] = []
   if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
-  lines = lines + ["#[derive(Debug, Clone, uniffi::Enum)]"]
+  lines = lines + ["#[derive(Debug, Clone, PartialEq, uniffi::Enum)]"]
   lines = lines + ["pub enum ${name} {"]
   for case in cases {
     let cname = get_str(case, "name")
@@ -83,34 +108,6 @@ fn gen_variant_lines(name: String, doc: String, cases: List[Value]) -> List[Stri
       },
     }
   }
-  lines = lines + ["}"]
-  lines = lines + [""]
-  lines
-}
-
-// ── Function codegen ──
-
-fn gen_fn_lines(f: Value) -> List[String] = {
-  let fname = get_str(f, "name")
-  let params = get_arr(f, "params")
-  let ret = json.get(f, "return") ?? json.null()
-  let doc = get_str(f, "doc")
-
-  let param_strs = params.map((p) => {
-    let ptype = json.get(p, "type") ?? json.null()
-    let pname = get_str(p, "name")
-    if get_kind(ptype) == "named" then "${pname}: &${rust_type(ptype)}"
-    else "${pname}: ${rust_type(ptype)}"
-  })
-
-  let params_str = param_strs.join(", ")
-  let ret_type = rust_type(ret)
-
-  var lines: List[String] = []
-  if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
-  lines = lines + ["#[uniffi::export]"]
-  lines = lines + ["pub fn ${fname}(${params_str}) -> ${ret_type} {"]
-  lines = lines + ["    todo!(\"body extracted from mathlib.rs\")"]
   lines = lines + ["}"]
   lines = lines + [""]
   lines
@@ -164,19 +161,26 @@ effect fn main() -> Unit = {
   let functions = get_arr(iface, "functions")
 
   var lines: List[String] = []
-  lines = lines + ["// Almide ${module_name} — UniFFI bindings (auto-generated from interface.json)"]
+  lines = lines + ["// Almide ${module_name} — UniFFI bindings (auto-generated)"]
+  lines = lines + ["#![allow(unused_parens, unused_variables, dead_code, unused_imports)]"]
   lines = lines + [""]
 
-  // Include runtime from Almide-generated Rust (stripped)
+  // Inline the Almide-generated Rust in a private module so that
+  // exported functions can delegate to inner:: with type conversions
+  lines = lines + ["mod inner {"]
+  lines = lines + ["    #![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then lines = lines
-    else if string.starts_with(line, "use std::collections") then lines = lines
+    else if string.starts_with(line, "use std::collections") then {
+        lines = lines + ["    " + line]
+    }
     else if string.contains(line, "fn main(") then lines = lines
-    else lines = lines + [line]
+    else lines = lines + ["    " + line]
   }
+  lines = lines + ["}"]
   lines = lines + [""]
 
-  // Generate type definitions
+  // Generate UniFFI-annotated types
   lines = lines + ["// ── Types ──"]
   lines = lines + [""]
   for t in types {
@@ -191,11 +195,127 @@ effect fn main() -> Unit = {
     } else lines = lines
   }
 
-  // Generate function wrappers
+  // Conversion impls between UniFFI types and inner types
+  for t in types {
+    let name = get_str(t, "name")
+    let kind = json.get(t, "kind") ?? json.null()
+    let k = get_kind(kind)
+    if k == "record" then {
+      let fields = get_arr(kind, "fields")
+      let to_inner = fields.map((fld) => "${get_str(fld, "name")}: v.${get_str(fld, "name")}.clone()").join(", ")
+      let from_inner = fields.map((fld) => "${get_str(fld, "name")}: v.${get_str(fld, "name")}").join(", ")
+      lines = lines + ["impl From<${name}> for inner::${name} {"]
+      lines = lines + ["    fn from(v: ${name}) -> Self { inner::${name} { ${to_inner} } }"]
+      lines = lines + ["}"]
+      lines = lines + ["impl From<inner::${name}> for ${name} {"]
+      lines = lines + ["    fn from(v: inner::${name}) -> Self { ${name} { ${from_inner} } }"]
+      lines = lines + ["}"]
+      lines = lines + [""]
+    } else if k == "variant" then {
+      let cases = get_arr(kind, "cases")
+      // to inner
+      lines = lines + ["impl From<${name}> for inner::${name} {"]
+      lines = lines + ["    fn from(v: ${name}) -> Self {"]
+      lines = lines + ["        match v {"]
+      for case in cases {
+        let cname = get_str(case, "name")
+        let payload = json.get(case, "payload")
+        match payload {
+          some(pl) => {
+            if get_kind(pl) == "tuple" then {
+              let pfields = get_arr(pl, "fields")
+              let n = list.len(pfields)
+              if n == 1 then {
+                lines = lines + ["            ${name}::${cname} { v0 } => inner::${name}::${cname}(v0),"]
+              } else if n == 2 then {
+                lines = lines + ["            ${name}::${cname} { v0, v1 } => inner::${name}::${cname}(v0, v1),"]
+              } else {
+                lines = lines + ["            ${name}::${cname} => inner::${name}::${cname},"]
+              }
+            } else {
+              lines = lines + ["            ${name}::${cname} => inner::${name}::${cname},"]
+            }
+          },
+          none => {
+            lines = lines + ["            ${name}::${cname} => inner::${name}::${cname},"]
+          },
+        }
+      }
+      lines = lines + ["        }"]
+      lines = lines + ["    }"]
+      lines = lines + ["}"]
+
+      // from inner
+      lines = lines + ["impl From<inner::${name}> for ${name} {"]
+      lines = lines + ["    fn from(v: inner::${name}) -> Self {"]
+      lines = lines + ["        match v {"]
+      for case in cases {
+        let cname = get_str(case, "name")
+        let payload = json.get(case, "payload")
+        match payload {
+          some(pl) => {
+            if get_kind(pl) == "tuple" then {
+              let pfields = get_arr(pl, "fields")
+              let n = list.len(pfields)
+              if n == 1 then {
+                lines = lines + ["            inner::${name}::${cname}(v0) => ${name}::${cname} { v0 },"]
+              } else if n == 2 then {
+                lines = lines + ["            inner::${name}::${cname}(v0, v1) => ${name}::${cname} { v0, v1 },"]
+              } else {
+                lines = lines + ["            inner::${name}::${cname} => ${name}::${cname},"]
+              }
+            } else {
+              lines = lines + ["            inner::${name}::${cname} => ${name}::${cname},"]
+            }
+          },
+          none => {
+            lines = lines + ["            inner::${name}::${cname} => ${name}::${cname},"]
+          },
+        }
+      }
+      lines = lines + ["        }"]
+      lines = lines + ["    }"]
+      lines = lines + ["}"]
+      lines = lines + [""]
+    } else lines = lines
+  }
+
+  // Generate exported functions that delegate to inner:: with type conversions
   lines = lines + ["// ── Functions ──"]
   lines = lines + [""]
   for f in functions {
-    lines = lines + gen_fn_lines(f)
+    let fname = get_str(f, "name")
+    let params = get_arr(f, "params")
+    let ret = json.get(f, "return") ?? json.null()
+    let doc = get_str(f, "doc")
+
+    let param_strs = params.map((p) => {
+      let ptype = json.get(p, "type") ?? json.null()
+      let pname = get_str(p, "name")
+      "${pname}: ${rust_type(ptype)}"
+    })
+    let params_str = param_strs.join(", ")
+    let ret_type = rust_type(ret)
+
+    let call_args = params.map((p) => {
+      let ptype = json.get(p, "type") ?? json.null()
+      let pname = get_str(p, "name")
+      if is_record_type(ptype, types) then "inner::${get_str(ptype, "name")}::from(${pname})"
+      else if is_variant_type(ptype, types) then "inner::${get_str(ptype, "name")}::from(${pname})"
+      else pname
+    })
+    let args_str = call_args.join(", ")
+
+    let ret_is_named = is_record_type(ret, types) or is_variant_type(ret, types)
+    let ret_expr = if ret_is_named then "${get_str(ret, "name")}::from(inner::${fname}(${args_str}))"
+      else "inner::${fname}(${args_str})"
+
+    if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
+    lines = lines + ["#[uniffi::export]"]
+    lines = lines + ["pub fn ${fname}(${params_str}) -> ${ret_type} {"]
+    lines = lines + ["    ${ret_expr}"]
+    lines = lines + ["}"]
+    lines = lines + [""]
   }
 
   // Scaffolding

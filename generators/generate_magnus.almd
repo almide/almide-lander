@@ -1,6 +1,9 @@
 // generate_magnus.almd — Generate Ruby Magnus binding from Almide Module Interface
 //
 // Usage: almide run generate_magnus.almd -- interface.json mathlib.rs
+//
+// Wraps Almide-generated Rust in `mod inner { ... }` then generates
+// Magnus wrapper types that delegate to inner:: functions.
 
 import json
 import fs
@@ -40,13 +43,33 @@ fn capitalize(s: String) -> String = {
   "${first}${rest}"
 }
 
+// ── Type category helpers ──
+
+fn is_record_type(ty: Value, types: List[Value]) -> Bool = {
+  if get_str(ty, "kind") != "named" then false
+  else {
+    let tname = get_str(ty, "name")
+    let matches = types.filter((t) => get_str(t, "name") == tname and get_kind(json.get(t, "kind") ?? json.null()) == "record")
+    list.len(matches) > 0
+  }
+}
+
+fn is_variant_type(ty: Value, types: List[Value]) -> Bool = {
+  if get_str(ty, "kind") != "named" then false
+  else {
+    let tname = get_str(ty, "name")
+    let matches = types.filter((t) => get_str(t, "name") == tname and get_kind(json.get(t, "kind") ?? json.null()) == "variant")
+    list.len(matches) > 0
+  }
+}
+
 // ── Record codegen ──
 
 fn gen_record_lines(mod_ruby: String, name: String, fields: List[Value]) -> List[String] = {
   var lines: List[String] = []
   lines = lines + ["#[magnus::wrap(class = \"${mod_ruby}::${name}\")]"]
   lines = lines + ["#[derive(Clone, Debug)]"]
-  lines = lines + ["struct ${name} {"]
+  lines = lines + ["struct Rb${name} {"]
   for f in fields {
     let fname = get_str(f, "name")
     let ftype = rust_type(get_type(f))
@@ -55,23 +78,35 @@ fn gen_record_lines(mod_ruby: String, name: String, fields: List[Value]) -> List
   lines = lines + ["}"]
   lines = lines + [""]
 
-  // impl block
-  lines = lines + ["impl ${name} {"]
-  // Constructor
+  // impl block with constructor + getters + inspect
+  lines = lines + ["impl Rb${name} {"]
   let param_parts = fields.map((f) => "${get_str(f, "name")}: ${rust_type(get_type(f))}")
   let params = param_parts.join(", ")
   let ctor_args = fields.map((f) => get_str(f, "name")).join(", ")
-  lines = lines + ["    fn new(${params}) -> Self { ${name} { ${ctor_args} } }"]
-  // Getters
+  lines = lines + ["    fn new(${params}) -> Self { Rb${name} { ${ctor_args} } }"]
   for f in fields {
     let fname = get_str(f, "name")
     let ftype = rust_type(get_type(f))
     lines = lines + ["    fn ${fname}(&self) -> ${ftype} { self.${fname}.clone() }"]
   }
-  // Inspect
   let fmt_parts = fields.map((f) => "${get_str(f, "name")}={}").join(", ")
   let fmt_args = fields.map((f) => "self.${get_str(f, "name")}").join(", ")
   lines = lines + ["    fn inspect(&self) -> String { format!(\"${name}(${fmt_parts})\", ${fmt_args}) }"]
+  lines = lines + ["    fn eq(&self, other: &Rb${name}) -> bool {"]
+  let eq_parts = fields.map((f) => "self.${get_str(f, "name")} == other.${get_str(f, "name")}").join(" && ")
+  lines = lines + ["        ${eq_parts}"]
+  lines = lines + ["    }"]
+  lines = lines + ["}"]
+  lines = lines + [""]
+
+  // Conversions to/from inner type
+  let to_inner = fields.map((f) => "${get_str(f, "name")}: p.${get_str(f, "name")}.clone()").join(", ")
+  lines = lines + ["impl From<&Rb${name}> for inner::${name} {"]
+  lines = lines + ["    fn from(p: &Rb${name}) -> Self { inner::${name} { ${to_inner} } }"]
+  lines = lines + ["}"]
+  let from_inner = fields.map((f) => "${get_str(f, "name")}: a.${get_str(f, "name")}").join(", ")
+  lines = lines + ["impl From<inner::${name}> for Rb${name} {"]
+  lines = lines + ["    fn from(a: inner::${name}) -> Self { Rb${name} { ${from_inner} } }"]
   lines = lines + ["}"]
   lines = lines + [""]
   lines
@@ -83,9 +118,9 @@ fn gen_variant_lines(mod_ruby: String, name: String, cases: List[Value]) -> List
   var lines: List[String] = []
   lines = lines + ["#[magnus::wrap(class = \"${mod_ruby}::${name}\")]"]
   lines = lines + ["#[derive(Clone, Debug)]"]
-  lines = lines + ["struct ${name} { tag: String, values: Vec<f64> }"]
+  lines = lines + ["struct Rb${name} { inner: inner::${name} }"]
   lines = lines + [""]
-  lines = lines + ["impl ${name} {"]
+  lines = lines + ["impl Rb${name} {"]
   for case in cases {
     let cname = get_str(case, "name")
     let factory = cname.to_lower()
@@ -97,24 +132,32 @@ fn gen_variant_lines(mod_ruby: String, name: String, cases: List[Value]) -> List
           let n = list.len(pfields)
           if n == 1 then {
             let t0 = rust_type(list.get_or(pfields, 0, json.null()))
-            lines = lines + ["    fn ${factory}(v0: ${t0}) -> Self { ${name} { tag: \"${cname}\".into(), values: vec![v0] } }"]
+            lines = lines + ["    fn ${factory}(v0: ${t0}) -> Self { Rb${name} { inner: inner::${name}::${cname}(v0) } }"]
           } else if n == 2 then {
             let t0 = rust_type(list.get_or(pfields, 0, json.null()))
             let t1 = rust_type(list.get_or(pfields, 1, json.null()))
-            lines = lines + ["    fn ${factory}(v0: ${t0}, v1: ${t1}) -> Self { ${name} { tag: \"${cname}\".into(), values: vec![v0, v1] } }"]
+            lines = lines + ["    fn ${factory}(v0: ${t0}, v1: ${t1}) -> Self { Rb${name} { inner: inner::${name}::${cname}(v0, v1) } }"]
           } else {
-            lines = lines + ["    fn ${factory}() -> Self { ${name} { tag: \"${cname}\".into(), values: vec![] } }"]
+            lines = lines + ["    fn ${factory}() -> Self { Rb${name} { inner: inner::${name}::${cname} } }"]
           }
         } else {
-          lines = lines + ["    fn ${factory}() -> Self { ${name} { tag: \"${cname}\".into(), values: vec![] } }"]
+          lines = lines + ["    fn ${factory}() -> Self { Rb${name} { inner: inner::${name}::${cname} } }"]
         }
       },
       none => {
-        lines = lines + ["    fn ${factory}() -> Self { ${name} { tag: \"${cname}\".into(), values: vec![] } }"]
+        lines = lines + ["    fn ${factory}() -> Self { Rb${name} { inner: inner::${name}::${cname} } }"]
       },
     }
   }
-  lines = lines + ["    fn inspect(&self) -> String { format!(\"${name}::{}({:?})\", self.tag, self.values) }"]
+  lines = lines + ["    fn tag(&self) -> String { format!(\"{:?}\", self.inner).split('(').next().unwrap_or(\"\").to_string() }"]
+  lines = lines + ["    fn inspect(&self) -> String { format!(\"${name}.{:?}\", self.inner) }"]
+  lines = lines + ["    fn eq(&self, other: &Rb${name}) -> bool { self.inner == other.inner }"]
+  lines = lines + ["}"]
+  lines = lines + [""]
+
+  // Conversion: Rb wrapper -> inner type
+  lines = lines + ["impl From<&Rb${name}> for inner::${name} {"]
+  lines = lines + ["    fn from(p: &Rb${name}) -> Self { p.inner.clone() }"]
   lines = lines + ["}"]
   lines = lines + [""]
   lines
@@ -122,24 +165,44 @@ fn gen_variant_lines(mod_ruby: String, name: String, cases: List[Value]) -> List
 
 // ── Function wrapper codegen ──
 
-fn gen_fn_lines(f: Value) -> List[String] = {
+fn gen_fn_lines(f: Value, types: List[Value]) -> List[String] = {
   let fname = get_str(f, "name")
   let params = get_arr(f, "params")
   let ret = json.get(f, "return") ?? json.null()
 
+  // Parameter types: use Rb-prefixed wrappers for named types
   let param_strs = params.map((p) => {
     let ptype = json.get(p, "type") ?? json.null()
     let pname = get_str(p, "name")
-    if get_kind(ptype) == "named" then "${pname}: &${get_str(ptype, "name")}"
+    if is_record_type(ptype, types) then "${pname}: &Rb${get_str(ptype, "name")}"
+    else if is_variant_type(ptype, types) then "${pname}: &Rb${get_str(ptype, "name")}"
     else "${pname}: ${rust_type(ptype)}"
   })
   let params_str = param_strs.join(", ")
 
-  let ret_type = if get_kind(ret) == "named" then get_str(ret, "name") else rust_type(ret)
+  // Call arguments: convert Rb wrappers to inner types
+  let call_args = params.map((p) => {
+    let ptype = json.get(p, "type") ?? json.null()
+    let pname = get_str(p, "name")
+    if is_record_type(ptype, types) then "inner::${get_str(ptype, "name")}::from(${pname})"
+    else if is_variant_type(ptype, types) then "inner::${get_str(ptype, "name")}::from(${pname})"
+    else pname
+  })
+  let args_str = call_args.join(", ")
+
+  // Return type and wrapping
+  let ret_is_record = is_record_type(ret, types)
+  let ret_is_variant = is_variant_type(ret, types)
+  let ret_type = if ret_is_record then "Rb${get_str(ret, "name")}"
+    else if ret_is_variant then "Rb${get_str(ret, "name")}"
+    else rust_type(ret)
+  let ret_expr = if ret_is_record then "Rb${get_str(ret, "name")}::from(inner::${fname}(${args_str}))"
+    else if ret_is_variant then "Rb${get_str(ret, "name")} { inner: inner::${fname}(${args_str}) }"
+    else "inner::${fname}(${args_str})"
 
   var lines: List[String] = []
   lines = lines + ["fn rb_${fname}(${params_str}) -> ${ret_type} {"]
-  lines = lines + ["    todo!(\"${fname}\")"]
+  lines = lines + ["    ${ret_expr}"]
   lines = lines + ["}"]
   lines = lines + [""]
   lines
@@ -164,13 +227,14 @@ fn gen_init_lines(mod_ruby: String, types: List[Value], functions: List[Value]) 
     if k == "record" then {
       let fields = get_arr(kind, "fields")
       let nfields = list.len(fields)
-      lines = lines + ["    ${name_lower}_cls.define_singleton_method(\"new\", function!(${name}::new, ${int.to_string(nfields)}))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_singleton_method(\"new\", function!(Rb${name}::new, ${int.to_string(nfields)}))?;"]
       for f in fields {
         let fname = get_str(f, "name")
-        lines = lines + ["    ${name_lower}_cls.define_method(\"${fname}\", method!(${name}::${fname}, 0))?;"]
+        lines = lines + ["    ${name_lower}_cls.define_method(\"${fname}\", method!(Rb${name}::${fname}, 0))?;"]
       }
-      lines = lines + ["    ${name_lower}_cls.define_method(\"inspect\", method!(${name}::inspect, 0))?;"]
-      lines = lines + ["    ${name_lower}_cls.define_method(\"to_s\", method!(${name}::inspect, 0))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_method(\"inspect\", method!(Rb${name}::inspect, 0))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_method(\"to_s\", method!(Rb${name}::inspect, 0))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_method(\"==\", method!(Rb${name}::eq, 1))?;"]
     } else if k == "variant" then {
       let cases = get_arr(kind, "cases")
       for case in cases {
@@ -184,9 +248,12 @@ fn gen_init_lines(mod_ruby: String, types: List[Value], functions: List[Value]) 
           },
           none => "0",
         }
-        lines = lines + ["    ${name_lower}_cls.define_singleton_method(\"${factory}\", function!(${name}::${factory}, ${nargs}))?;"]
+        lines = lines + ["    ${name_lower}_cls.define_singleton_method(\"${factory}\", function!(Rb${name}::${factory}, ${nargs}))?;"]
       }
-      lines = lines + ["    ${name_lower}_cls.define_method(\"inspect\", method!(${name}::inspect, 0))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_method(\"tag\", method!(Rb${name}::tag, 0))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_method(\"inspect\", method!(Rb${name}::inspect, 0))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_method(\"to_s\", method!(Rb${name}::inspect, 0))?;"]
+      lines = lines + ["    ${name_lower}_cls.define_method(\"==\", method!(Rb${name}::eq, 1))?;"]
     } else lines = lines
     lines = lines + [""]
   }
@@ -208,7 +275,7 @@ fn gen_init_lines(mod_ruby: String, types: List[Value], functions: List[Value]) 
 fn gen_cargo_toml(module_name: String) -> String = {
   var lines: List[String] = []
   lines = lines + ["[package]"]
-  lines = lines + ["name = \"almide-${module_name}-ruby\""]
+  lines = lines + ["name = \"almide_${module_name}\""]
   lines = lines + ["version = \"0.1.0\""]
   lines = lines + ["edition = \"2021\""]
   lines = lines + [""]
@@ -240,25 +307,23 @@ effect fn main() -> Unit = {
   var lines: List[String] = []
   lines = lines + ["// AUTO-GENERATED by almide-lander — do not edit"]
   lines = lines + ["use magnus::{prelude::*, function, method, Ruby, Error};"]
-  lines = lines + ["use std::f64::consts::PI;"]
   lines = lines + [""]
 
-  // Runtime inlines
-  lines = lines + ["// Almide math runtime (inlined)"]
-  lines = lines + ["fn almide_rt_math_sqrt(x: f64) -> f64 { x.sqrt() }"]
-  lines = lines + ["fn almide_rt_math_pi() -> f64 { PI }"]
-  lines = lines + [""]
-
-  // Include Almide-generated Rust (stripped)
+  // Wrap Almide-generated Rust in mod inner
+  lines = lines + ["mod inner {"]
+  lines = lines + ["    #![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then lines = lines
-    else if string.starts_with(line, "use std::collections") then lines = lines
+    else if string.starts_with(line, "use std::collections") then {
+        lines = lines + ["    " + line]
+    }
     else if string.contains(line, "fn main(") then lines = lines
-    else lines = lines + [line]
+    else lines = lines + ["    " + line]
   }
+  lines = lines + ["}"]
   lines = lines + [""]
 
-  // Types
+  // Wrapper types with Rb prefix
   for t in types {
     let name = get_str(t, "name")
     let kind = json.get(t, "kind") ?? json.null()
@@ -270,9 +335,9 @@ effect fn main() -> Unit = {
     } else lines = lines
   }
 
-  // Function wrappers
+  // Function wrappers that delegate to inner::
   for f in functions {
-    lines = lines + gen_fn_lines(f)
+    lines = lines + gen_fn_lines(f, types)
   }
 
   // Init

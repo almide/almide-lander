@@ -44,12 +44,36 @@ fn js_type(ty: Value) -> String = {
   else "any"
 }
 
+// ── Helpers to check type category ──
+
+fn is_record_type(ty: Value, types: List[Value]) -> Bool = {
+  if get_str(ty, "kind") != "named" then false
+  else {
+    let tname = get_str(ty, "name")
+    let matches = types.filter((t) => get_str(t, "name") == tname and get_kind(json.get(t, "kind") ?? json.null()) == "record")
+    list.len(matches) > 0
+  }
+}
+
+fn is_variant_type(ty: Value, types: List[Value]) -> Bool = {
+  if get_str(ty, "kind") != "named" then false
+  else {
+    let tname = get_str(ty, "name")
+    let matches = types.filter((t) => get_str(t, "name") == tname and get_kind(json.get(t, "kind") ?? json.null()) == "variant")
+    list.len(matches) > 0
+  }
+}
+
+fn find_type_def(name: String, types: List[Value]) -> Value = {
+  let matches = types.filter((t) => get_str(t, "name") == name)
+  list.get_or(matches, 0, json.null())
+}
+
 // ── Record codegen ──
 
 fn gen_record_lines(name: String, doc: String, fields: List[Value]) -> List[String] = {
   var lines: List[String] = []
   if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
-  lines = lines + ["/// napi(object) makes this a plain JS object."]
   lines = lines + ["#[napi(object)]"]
   lines = lines + ["#[derive(Clone, Debug)]"]
   lines = lines + ["pub struct ${name} {"]
@@ -60,6 +84,19 @@ fn gen_record_lines(name: String, doc: String, fields: List[Value]) -> List[Stri
   }
   lines = lines + ["}"]
   lines = lines + [""]
+
+  // Conversion: napi wrapper -> inner type
+  let to_inner_fields = fields.map((f) => "${get_str(f, "name")}: p.${get_str(f, "name")}.clone()").join(", ")
+  lines = lines + ["impl From<&${name}> for inner::${name} {"]
+  lines = lines + ["    fn from(p: &${name}) -> Self { inner::${name} { ${to_inner_fields} } }"]
+  lines = lines + ["}"]
+
+  // Conversion: inner type -> napi wrapper
+  let from_inner_fields = fields.map((f) => "${get_str(f, "name")}: a.${get_str(f, "name")}").join(", ")
+  lines = lines + ["impl From<inner::${name}> for ${name} {"]
+  lines = lines + ["    fn from(a: inner::${name}) -> Self { ${name} { ${from_inner_fields} } }"]
+  lines = lines + ["}"]
+  lines = lines + [""]
   lines
 }
 
@@ -67,40 +104,16 @@ fn gen_record_lines(name: String, doc: String, fields: List[Value]) -> List[Stri
 
 fn gen_variant_lines(name: String, doc: String, cases: List[Value]) -> List[String] = {
   var lines: List[String] = []
-  let inner_name = "${name}Inner"
 
-  // Internal enum
-  if doc != "" then lines = lines + ["/// Internal Rust enum for ${name} -- not directly exposed to JS."] else lines = lines
-  lines = lines + ["#[derive(Clone, Debug)]"]
-  lines = lines + ["enum ${inner_name} {"]
-  for case in cases {
-    let cname = get_str(case, "name")
-    let payload = json.get(case, "payload")
-    match payload {
-      some(pl) => {
-        if get_kind(pl) == "tuple" then {
-          let pfields = get_arr(pl, "fields")
-          let tuple_types = pfields.map((pf) => rust_type(pf)).join(", ")
-          lines = lines + ["    ${cname}(${tuple_types}),"]
-        } else lines = lines + ["    ${cname},"]
-      },
-      none => {
-        lines = lines + ["    ${cname},"]
-      },
-    }
-  }
-  lines = lines + ["}"]
-  lines = lines + [""]
-
-  // Napi wrapper struct
+  // Napi wrapper struct holding the inner enum
   if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
   lines = lines + ["#[napi]"]
   lines = lines + ["pub struct ${name} {"]
-  lines = lines + ["    inner: ${inner_name},"]
+  lines = lines + ["    value: inner::${name},"]
   lines = lines + ["}"]
   lines = lines + [""]
 
-  // Factory methods
+  // Factory methods + accessors
   lines = lines + ["#[napi]"]
   lines = lines + ["impl ${name} {"]
   for case in cases {
@@ -114,41 +127,47 @@ fn gen_variant_lines(name: String, doc: String, cases: List[Value]) -> List[Stri
           let n = list.len(pfields)
           if n == 1 then {
             let p0type = rust_type(list.get_or(pfields, 0, json.null()))
-            lines = lines + ["    /// Create a ${factory_name}."]
             lines = lines + ["    #[napi(factory)]"]
             lines = lines + ["    pub fn ${factory_name}(v0: ${p0type}) -> ${name} {"]
-            lines = lines + ["        ${name} { inner: ${inner_name}::${cname}(v0) }"]
+            lines = lines + ["        ${name} { value: inner::${name}::${cname}(v0) }"]
             lines = lines + ["    }"]
-            lines = lines + [""]
           } else if n == 2 then {
             let p0type = rust_type(list.get_or(pfields, 0, json.null()))
             let p1type = rust_type(list.get_or(pfields, 1, json.null()))
-            lines = lines + ["    /// Create a ${factory_name}."]
             lines = lines + ["    #[napi(factory)]"]
             lines = lines + ["    pub fn ${factory_name}(v0: ${p0type}, v1: ${p1type}) -> ${name} {"]
-            lines = lines + ["        ${name} { inner: ${inner_name}::${cname}(v0, v1) }"]
+            lines = lines + ["        ${name} { value: inner::${name}::${cname}(v0, v1) }"]
             lines = lines + ["    }"]
-            lines = lines + [""]
           } else lines = lines
         } else {
-          lines = lines + ["    /// Create a ${factory_name}."]
           lines = lines + ["    #[napi(factory)]"]
           lines = lines + ["    pub fn ${factory_name}() -> ${name} {"]
-          lines = lines + ["        ${name} { inner: ${inner_name}::${cname} }"]
+          lines = lines + ["        ${name} { value: inner::${name}::${cname} }"]
           lines = lines + ["    }"]
-          lines = lines + [""]
         }
       },
       none => {
-        lines = lines + ["    /// Create a ${factory_name}."]
         lines = lines + ["    #[napi(factory)]"]
         lines = lines + ["    pub fn ${factory_name}() -> ${name} {"]
-        lines = lines + ["        ${name} { inner: ${inner_name}::${cname} }"]
+        lines = lines + ["        ${name} { value: inner::${name}::${cname} }"]
         lines = lines + ["    }"]
-        lines = lines + [""]
       },
     }
   }
+  // tag getter
+  lines = lines + ["    #[napi(getter)]"]
+  lines = lines + ["    pub fn tag(&self) -> String {"]
+  lines = lines + ["        format!(\"{:?}\", self.value).split('(').next().unwrap_or(\"\").to_string()"]
+  lines = lines + ["    }"]
+  // to_string
+  lines = lines + ["    #[napi]"]
+  lines = lines + ["    pub fn to_string(&self) -> String { format!(\"{:?}\", self.value) }"]
+  lines = lines + ["}"]
+  lines = lines + [""]
+
+  // Conversion: napi wrapper -> inner type
+  lines = lines + ["impl From<&${name}> for inner::${name} {"]
+  lines = lines + ["    fn from(p: &${name}) -> Self { p.value.clone() }"]
   lines = lines + ["}"]
   lines = lines + [""]
   lines
@@ -162,28 +181,43 @@ fn gen_fn_lines(f: Value, types: List[Value]) -> List[String] = {
   let ret = json.get(f, "return") ?? json.null()
   let doc = get_str(f, "doc")
 
-  // Build variant name set for reference detection
-  let variant_names = types.filter((t) => get_kind(json.get(t, "kind") ?? json.null()) == "variant").map((t) => get_str(t, "name"))
-
+  // Build parameter signatures: records by value, variants by ref
   let param_strs = params.map((p) => {
     let ptype = json.get(p, "type") ?? json.null()
     let pname = get_str(p, "name")
-    if get_kind(ptype) == "named" then {
-      let tname = get_str(ptype, "name")
-      if list.contains(variant_names, tname) then "${pname}: &${tname}"
-      else "${pname}: ${rust_type(ptype)}"
-    } else "${pname}: ${rust_type(ptype)}"
+    if is_variant_type(ptype, types) then "${pname}: &${get_str(ptype, "name")}"
+    else if is_record_type(ptype, types) then "${pname}: ${get_str(ptype, "name")}"
+    else "${pname}: ${rust_type(ptype)}"
+  })
+
+  // Build call arguments with conversion to inner types
+  let call_args = params.map((p) => {
+    let ptype = json.get(p, "type") ?? json.null()
+    let pname = get_str(p, "name")
+    if is_record_type(ptype, types) then "inner::${get_str(ptype, "name")}::from(&${pname})"
+    else if is_variant_type(ptype, types) then "inner::${get_str(ptype, "name")}::from(${pname})"
+    else pname
   })
 
   let params_str = param_strs.join(", ")
-  let ret_type = rust_type(ret)
+  let args_str = call_args.join(", ")
+  let ret_kind = get_kind(ret)
+
+  // Return type: wrap named types back to napi wrappers
+  let ret_type = if is_record_type(ret, types) then get_str(ret, "name")
+    else if is_variant_type(ret, types) then get_str(ret, "name")
+    else rust_type(ret)
+
+  // Return expression: convert inner result to wrapper
+  let ret_expr = if is_record_type(ret, types) then "${get_str(ret, "name")}::from(inner::${fname}(${args_str}))"
+    else if is_variant_type(ret, types) then "${get_str(ret, "name")} { value: inner::${fname}(${args_str}) }"
+    else "inner::${fname}(${args_str})"
 
   var lines: List[String] = []
   if doc != "" then lines = lines + ["/// ${doc}"] else lines = lines
   lines = lines + ["#[napi]"]
   lines = lines + ["pub fn ${fname}(${params_str}) -> ${ret_type} {"]
-  lines = lines + ["    // Body extracted from Almide-generated source"]
-  lines = lines + ["    todo!(\"extract body from mathlib.rs\")"]
+  lines = lines + ["    ${ret_expr}"]
   lines = lines + ["}"]
   lines = lines + [""]
   lines
@@ -246,6 +280,76 @@ fn gen_package_json(module_name: String) -> String = {
   lines.join("\n")
 }
 
+// ── .d.ts type declarations ──
+
+fn gen_dts_lines(types: List[Value], functions: List[Value]) -> List[String] = {
+  var lines: List[String] = []
+  lines = lines + ["// Type declarations — auto-generated"]
+  lines = lines + [""]
+
+  for t in types {
+    let name = get_str(t, "name")
+    let doc = get_str(t, "doc")
+    let kind = json.get(t, "kind") ?? json.null()
+    let k = get_kind(kind)
+    if k == "record" then {
+      let fields = get_arr(kind, "fields")
+      if doc != "" then lines = lines + ["/** ${doc} */"] else lines = lines
+      lines = lines + ["export interface ${name} {"]
+      for f in fields {
+        lines = lines + ["  ${get_str(f, "name")}: ${js_type(get_type(f))};"]
+      }
+      lines = lines + ["}"]
+      lines = lines + [""]
+    } else if k == "variant" then {
+      let cases = get_arr(kind, "cases")
+      if doc != "" then lines = lines + ["/** ${doc} */"] else lines = lines
+      lines = lines + ["export class ${name} {"]
+      lines = lines + ["  readonly tag: string;"]
+      for case in cases {
+        let cname = get_str(case, "name")
+        let factory = cname.to_lower()
+        let payload = json.get(case, "payload")
+        match payload {
+          some(pl) => {
+            if get_kind(pl) == "tuple" then {
+              let pfields = get_arr(pl, "fields")
+              let n = list.len(pfields)
+              if n == 1 then {
+                lines = lines + ["  static ${factory}(v0: ${js_type(list.get_or(pfields, 0, json.null()))}): ${name};"]
+              } else if n == 2 then {
+                lines = lines + ["  static ${factory}(v0: ${js_type(list.get_or(pfields, 0, json.null()))}, v1: ${js_type(list.get_or(pfields, 1, json.null()))}): ${name};"]
+              } else {
+                lines = lines + ["  static ${factory}(): ${name};"]
+              }
+            } else {
+              lines = lines + ["  static ${factory}(): ${name};"]
+            }
+          },
+          none => {
+            lines = lines + ["  static ${factory}(): ${name};"]
+          },
+        }
+      }
+      lines = lines + ["  toString(): string;"]
+      lines = lines + ["}"]
+      lines = lines + [""]
+    } else lines = lines
+  }
+
+  for f in functions {
+    let fname = get_str(f, "name")
+    let fparams = get_arr(f, "params")
+    let ret = json.get(f, "return") ?? json.null()
+    let doc = get_str(f, "doc")
+    let params_str = fparams.map((p) => "${get_str(p, "name")}: ${js_type(json.get(p, "type") ?? json.null())}").join(", ")
+    if doc != "" then lines = lines + ["/** ${doc} */"] else lines = lines
+    lines = lines + ["export function ${fname}(${params_str}): ${js_type(ret)};"]
+    lines = lines + [""]
+  }
+  lines
+}
+
 // ── Main ──
 
 effect fn main() -> Unit = {
@@ -263,21 +367,26 @@ effect fn main() -> Unit = {
 
   var lines: List[String] = []
   lines = lines + ["// AUTO-GENERATED by almide-lander — do not edit"]
-  lines = lines + ["#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use)]"]
   lines = lines + [""]
   lines = lines + ["use napi_derive::napi;"]
   lines = lines + [""]
 
-  // Include Almide-generated Rust (stripped)
+  // Wrap Almide-generated Rust in mod inner to avoid name collisions
+  lines = lines + ["#[allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
+  lines = lines + ["pub(crate) mod inner {"]
+  lines = lines + ["    pub(crate) use super::*;"]
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then lines = lines
-    else if string.starts_with(line, "use std::collections") then lines = lines
+    else if string.starts_with(line, "use std::collections") then {
+        lines = lines + ["    " + line]
+    }
     else if string.contains(line, "fn main(") then lines = lines
-    else lines = lines + [line]
+    else lines = lines + ["    " + line]
   }
+  lines = lines + ["}"]
   lines = lines + [""]
 
-  // Generate type definitions
+  // Generate type wrappers with conversions
   for t in types {
     let name = get_str(t, "name")
     let doc = get_str(t, "doc")
@@ -290,7 +399,7 @@ effect fn main() -> Unit = {
     } else lines = lines
   }
 
-  // Generate function wrappers
+  // Generate function wrappers that delegate to inner::
   for f in functions {
     lines = lines + gen_fn_lines(f, types)
   }
@@ -300,5 +409,8 @@ effect fn main() -> Unit = {
   fs.write("build.rs", gen_build_rs())!
   fs.write("package.json", gen_package_json(module_name))!
 
-  println("Generated: src/lib.rs, Cargo.toml, build.rs, package.json")
+  let dts = gen_dts_lines(types, functions)
+  fs.write("index.d.ts", dts.join("\n"))!
+
+  println("Generated: src/lib.rs, Cargo.toml, build.rs, package.json, index.d.ts")
 }

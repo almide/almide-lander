@@ -1,6 +1,10 @@
 // generate_c_ffi.almd — Generate C FFI wrapper from Almide Module Interface
 //
 // Usage: almide run generate_c_ffi.almd -- interface.json mathlib.rs
+//
+// Wraps Almide-generated Rust in `mod inner { ... }` then generates
+// `extern "C"` functions that flatten record fields into scalar args
+// and expand variant params into per-case functions.
 
 import json
 import fs
@@ -110,7 +114,7 @@ fn flatten_record_params(prefix: String, rec_name: String, types: List[Value]) -
   result
 }
 
-// ── Build Rust reconstruct expression ──
+// ── Build Rust reconstruct expression (with inner:: prefix) ──
 
 fn build_reconstruct(prefix: String, rec_name: String, types: List[Value]) -> String = {
   let fields = record_fields(rec_name, types)
@@ -121,7 +125,7 @@ fn build_reconstruct(prefix: String, rec_name: String, types: List[Value]) -> St
     if is_record_type(ft, types) then "${fname}: ${build_reconstruct("${arg}_", get_str(ft, "name"), types)}"
     else "${fname}: ${arg}"
   })
-  "${rec_name} { ${parts.join(", ")} }"
+  "inner::${rec_name} { ${parts.join(", ")} }"
 }
 
 // ── Generate extern "C" functions for non-variant params ──
@@ -178,7 +182,7 @@ fn gen_c_fn_variant(fname: String, params: List[Value], ret: Value, vi: Int, vpa
           call_args = call_args + [get_str(p, "name")]
         }
       } else {
-        // Insert variant constructor
+        // Insert variant constructor with inner:: prefix
         let payload = json.get(case, "payload")
         var payload_args: List[String] = []
         match payload {
@@ -205,9 +209,9 @@ fn gen_c_fn_variant(fname: String, params: List[Value], ret: Value, vi: Int, vpa
           },
         }
         if list.len(payload_args) > 0 then {
-          call_args = call_args + ["${vtype_name}::${cname}(${payload_args.join(", ")})"]
+          call_args = call_args + ["inner::${vtype_name}::${cname}(${payload_args.join(", ")})"]
         } else {
-          call_args = call_args + ["${vtype_name}::${cname}"]
+          call_args = call_args + ["inner::${vtype_name}::${cname}"]
         }
       }
       pi = pi + 1
@@ -231,7 +235,7 @@ fn gen_c_fn_body(extern_name: String, flat: List[String], call_args: List[String
   })
 
   let args_str = call_args.join(", ")
-  let call_expr = "${fname}(${args_str})"
+  let call_expr = "inner::${fname}(${args_str})"
   let ret_kind = get_str(ret, "kind")
 
   var lines: List[String] = []
@@ -334,16 +338,21 @@ effect fn main() -> Unit = {
   rs = rs + ["use std::os::raw::c_char;"]
   rs = rs + [""]
 
-  // Include Almide-generated Rust (stripped)
+  // Wrap Almide-generated Rust in mod inner
+  rs = rs + ["mod inner {"]
+  rs = rs + ["    #![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut)]"]
   for line in string.lines(rust_source) {
     if string.starts_with(line, "#![allow") then rs = rs
-    else if string.starts_with(line, "use std::collections") then rs = rs
+    else if string.starts_with(line, "use std::collections") then {
+        rs = rs + ["    " + line]
+    }
     else if string.contains(line, "fn main(") then rs = rs
-    else rs = rs + [line]
+    else rs = rs + ["    " + line]
   }
+  rs = rs + ["}"]
   rs = rs + [""]
 
-  // #[repr(C)] structs for record types
+  // #[repr(C)] structs for record types (separate from inner types)
   for t in types {
     let kind = json.get(t, "kind") ?? json.null()
     if get_kind(kind) == "record" then {
@@ -370,7 +379,7 @@ effect fn main() -> Unit = {
   rs = rs + ["}"]
   rs = rs + [""]
 
-  // Generate extern "C" functions
+  // Generate extern "C" functions that delegate to inner::
   for f in functions {
     let fname = get_str(f, "name")
     let params = get_arr(f, "params")
