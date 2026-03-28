@@ -2,10 +2,7 @@
   <img src="almide-lander.jpeg" alt="almide-lander" width="480" />
 </p>
 
-<h1 align="center">almide-lander</h1>
-
 <p align="center">
-  <strong>Cross-Language Package Lander</strong><br>
   Export Almide modules as native packages for Python, JS/TS, Swift, Ruby, C, and more.
 </p>
 
