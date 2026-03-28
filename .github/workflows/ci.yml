@@ -31,7 +31,7 @@ jobs:
 
       - name: Install Almide
         run: |
-          cargo install --git https://github.com/almide/almide.git --branch main
+          cargo install --git https://github.com/almide/almide.git --branch develop
           almide --version || echo "installed"
 
       - name: Run lander tests
