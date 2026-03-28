@@ -3,30 +3,59 @@
 </p>
 
 <p align="center">
-  Export Almide modules as native packages for Python, JS/TS, Swift, Ruby, C, and more.
+  Export Almide modules as native packages for 14 languages.
 </p>
 
 <p align="center">
-  <a href="https://github.com/almide/almide">Almide Compiler</a> ·
-  <a href="https://github.com/almide/playground">Playground</a> ·
-  <a href="#how-it-works">How It Works</a>
+  <a href="https://github.com/almide/almide">Almide</a> ·
+  <a href="https://github.com/almide/almide-bindgen">almide-bindgen</a> ·
+  <a href="https://github.com/almide/playground">Playground</a>
 </p>
 
 ---
 
 ## What is this?
 
-Write a library in [Almide](https://github.com/almide/almide). Run one command. Get a native package for any language.
+Write a library in Almide. Run one command. Use it from Python, Go, Swift, Ruby, C#, Dart, Kotlin, Java, C, Zig, Nim, Elixir, PHP, or Lua.
 
 ```bash
-almide-lander mathlib.almd --lang python   # → pip wheel
-almide-lander mathlib.almd --lang js       # → npm package
-almide-lander mathlib.almd --lang swift    # → Swift module
-almide-lander mathlib.almd --lang ruby     # → gem
-almide-lander mathlib.almd --lang c        # → .so + .h
+cd almide-lander
+almide run src/main.almd -- --lang python mylib.almd
 ```
 
-No runtime. No VM. No engine. The output is a native module that runs at full speed in the target language. Almide disappears — only the compiled code remains.
+No runtime. No VM. Almide disappears — only a native shared library and a pure language wrapper remain.
+
+## How it works
+
+```
+mylib.almd
+    │
+    ▼
+almide run src/main.almd -- --lang python mylib.almd
+    │
+    ├─ [1/4] almide compile --json    → interface.json
+    ├─ [2/4] almide --target rust     → source.rs
+    ├─ [3/4] bindgen.scaffolding.generate()  → src/lib.rs → cargo build → .dylib
+    └─ [4/4] bindgen.bindings.python.generate()  → almide_mathlib.py
+    │
+    ▼
+python3 -c "from almide_mathlib import Point, distance; print(distance(Point(x=0,y=0), Point(x=3,y=4)))"
+# → 5.0
+```
+
+## Architecture
+
+almide-lander is a CLI tool. The binding generation logic lives in [almide-bindgen](https://github.com/almide/almide-bindgen), which is imported as an Almide library.
+
+```
+almide-bindgen (library)              almide-lander (this repo, CLI)
+├── src/mod.almd                      ├── almide.toml → depends on bindgen
+├── src/scaffolding.almd              └── src/main.almd → import bindgen
+└── src/bindings/ (14 languages)            calls bindgen.scaffolding.generate()
+                                            calls bindgen.bindings.python.generate()
+```
+
+Everything is written in Almide. No Python, no JavaScript, no external tool dependencies.
 
 ## Demo
 
@@ -34,12 +63,8 @@ No runtime. No VM. No engine. The output is a native module that runs at full sp
 import math
 
 type Point = { x: Float, y: Float }
+type Shape = Circle(Float) | Rect(Float, Float)
 
-type Shape =
-  | Circle(Float)
-  | Rect(Float, Float)
-
-// Euclidean distance between two points.
 fn distance(a: Point, b: Point) -> Float = {
   let dx = a.x - b.x
   let dy = a.y - b.y
@@ -52,137 +77,23 @@ fn area(shape: Shape) -> Float = match shape {
 }
 ```
 
-Then use it from any language:
-
 **Python**
 ```python
 from almide_mathlib import Point, Shape, distance, area
 
-d = distance(Point(x=0, y=0), Point(x=3, y=4))  # 5.0
-a = area(Shape.circle(5.0))                       # 78.54
+distance(Point(x=0, y=0), Point(x=3, y=4))  # 5.0
+area(Shape.circle(5.0))                       # 78.54
 ```
 
-**JavaScript**
-```javascript
-const { distance, area, Shape } = require('almide-mathlib');
-
-distance({x: 0, y: 0}, {x: 3, y: 4});  // 5.0
-area(Shape.circle(5.0));                  // 78.54
+**Go**
+```go
+d := almide.Distance(almide.Point{X: 0, Y: 0}, almide.Point{X: 3, Y: 4})  // 5.0
 ```
 
 **Swift**
 ```swift
-let d = distance(a: Point(x: 0, y: 0), b: Point(x: 3, y: 4))  // 5.0
-let a = area(shape: Shape.circle(radius: 5.0))                   // 78.54
+let d = Mathlib.distance(Point(x: 0, y: 0), Point(x: 3, y: 4))  // 5.0
 ```
-
-**C**
-```c
-double d = almide_distance(0, 0, 3, 4);  // 5.0
-double a = almide_area_circle(5.0);       // 78.54
-```
-
-## How It Works
-
-```
-mathlib.almd
-     │
-     ├─ almide --emit-interface → interface.json (types + functions + docs)
-     ├─ almide --target rust    → Rust source
-     └─ almide --target wasm    → WASM binary
-            │
-     almide-lander reads interface.json + compiled output
-            │
-            ├── Python:  Rust + PyO3 annotations → maturin → .whl
-            ├── Node.js: Rust + napi-rs annotations → napi build → .node
-            ├── Swift:   Rust + UniFFI annotations → uniffi-bindgen → .swift
-            ├── JS/TS:   WASM + generated glue + .d.ts → npm package
-            ├── C:       Rust + extern "C" + repr(C) → .so + .h
-            └── Ruby:    Rust + Magnus annotations → gem
-```
-
-### The Module Interface
-
-The Almide compiler extracts the public API into a language-agnostic JSON description:
-
-```bash
-almide mathlib.almd --emit-interface
-```
-
-```json
-{
-  "module": "mathlib",
-  "types": [
-    { "name": "Point", "kind": { "kind": "record", "fields": [
-      { "name": "x", "type": { "kind": "float" } },
-      { "name": "y", "type": { "kind": "float" } }
-    ]}, "doc": "A 2D point with x and y coordinates." }
-  ],
-  "functions": [
-    { "name": "distance",
-      "params": [
-        { "name": "a", "type": { "kind": "named", "name": "Point" } },
-        { "name": "b", "type": { "kind": "named", "name": "Point" } }
-      ],
-      "return": { "kind": "float" },
-      "doc": "Euclidean distance between two points.",
-      "examples": ["distance(Point(0.0, 0.0), Point(3.0, 4.0)) == 5.0"]
-    }
-  ]
-}
-```
-
-This JSON is the **stable contract** between the compiler and every binding generator. Almide-lander reads it to generate language-specific wrappers.
-
-### Type Mapping
-
-| Almide | Python | TypeScript | Swift | C | Ruby |
-|--------|--------|------------|-------|---|------|
-| `Int` | `int` | `number` | `Int64` | `int64_t` | `Integer` |
-| `Float` | `float` | `number` | `Double` | `double` | `Float` |
-| `String` | `str` | `string` | `String` | `char*` | `String` |
-| `Bool` | `bool` | `boolean` | `Bool` | `bool` | `true/false` |
-| `List[T]` | `list[T]` | `T[]` | `[T]` | — | `Array` |
-| `Option[T]` | `T \| None` | `T \| null` | `T?` | nullable | `T \| nil` |
-| `Record` | `@dataclass` | `interface` | `struct` | `struct` | `Struct` |
-| `Variant` | `enum` | `union` | `enum` | tagged union | `class` |
-
-### Two Paths
-
-**Native path** (PyO3, napi-rs, Magnus, UniFFI): Almide → Rust source → language-specific binding annotations → native extension. Full speed, no overhead.
-
-**WASM path** (JS/TS): Almide → WASM binary → JS glue + TypeScript declarations. Runs in any JS runtime (browser, Node, Deno, Bun).
-
-## Verified Languages
-
-| Language | Path | Status | How |
-|----------|------|--------|-----|
-| Python | PyO3 (native) | **verified** | `maturin build` → `.whl` |
-| Python | UniFFI (native) | **verified** | auto-generated ctypes bridge |
-| Swift | UniFFI (native) | **verified** | native Swift types |
-| Node.js | napi-rs (native) | **verified** | `.node` addon |
-| JS/TS | WASM (Deno) | **verified** | `.wasm` + `.d.ts` |
-| C | cdylib (native) | **verified** | `.so` + `.h` |
-| Ruby | Magnus (native) | code ready | needs Ruby 3.1+ |
-| Kotlin | UniFFI | supported | via uniffi-bindgen |
-| Go | UniFFI | supported | via uniffi-bindgen-go |
-| C# | UniFFI | supported | via uniffi-bindgen-cs |
-| Dart | UniFFI | supported | via uniffi-rs-dart |
-
-## Why Not Just Write Rust?
-
-If a human is writing the code, Rust is great. But if an **LLM** is generating the library:
-
-- Almide's syntax eliminates borrowing, lifetimes, trait bounds, and macro complexity
-- LLMs produce correct Almide code in fewer attempts than Rust
-- The compiled output is identical — same `rustc` optimizations, same machine code
-- One command packages it for any ecosystem
-
-**Almide is what you get when you design a language for AI to write and compile to native speed.**
-
-## Status
-
-Early development. The Module Interface (`--emit-interface`) is stable and ships with the Almide compiler. The binding generators are proven via end-to-end tests but not yet packaged as a standalone tool.
 
 ## License
 

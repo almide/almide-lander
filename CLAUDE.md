@@ -1,32 +1,27 @@
 # almide-lander
 
-Cross-Language Package Lander — CLI tool for exporting Almide modules to other languages.
+CLI tool for exporting Almide modules to other languages.
 
-Depends on [almide-bindgen](https://github.com/almide/almide-bindgen) (library).
+Depends on [almide-bindgen](https://github.com/almide/almide-bindgen) as an Almide library.
 
 ## Project Structure
 
 ```
 almide-lander/
-├── almide.toml              ← [dependencies] bindgen = { git = "..." }
+├── almide.toml       ← [dependencies] bindgen
+├── almide.lock
 ├── src/
-│   └── main.almd            ← CLI entry point (import bindgen)
-├── generators/              ← Legacy standalone generators (reference)
-├── examples/                ← Example outputs for each language
-├── sample/                  ← Sample Almide library for testing
-├── almide-lander.jpeg       ← Hero image
+│   └── main.almd     ← import bindgen → CLI entry point
+├── almide-lander.jpeg
 ├── README.md
 ├── CLAUDE.md
 └── LICENSE
 ```
 
-## Relationship
+## Usage
 
-```
-almide-bindgen (library)     →  almide-lander (CLI tool)
-  src/mod.almd                     src/main.almd
-  src/scaffolding.almd               import bindgen
-  src/bindings/*.almd                 CLI args → bindgen calls
+```bash
+almide run src/main.almd -- --lang python mylib.almd
 ```
 
 ## Git Commit Rules
