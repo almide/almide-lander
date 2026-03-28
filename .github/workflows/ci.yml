@@ -93,14 +93,15 @@ jobs:
               echo 'package main' > main.go
               echo 'import ("fmt"; a "t/almide_mathlib")' >> main.go
               echo 'func main(){fmt.Println(a.Distance(a.Point{X:0,Y:0},a.Point{X:3,Y:4}))}' >> main.go
-              CGO_LDFLAGS="-L$(pwd)/almide_mathlib -lalmide_mathlib" go run . | grep -q "5" && echo "PASS"
+              LD_LIBRARY_PATH=$(pwd)/almide_mathlib CGO_LDFLAGS="-L$(pwd)/almide_mathlib -lalmide_mathlib" go run . | grep -q "5" && echo "PASS"
           - lang: ruby
             setup: |
               sudo apt-get install -y ruby-dev libffi-dev
               sudo gem install ffi
             test: |
               ln -sf libalmide_mathlib.so libalmide_mathlib.dylib 2>/dev/null || true
-              ruby -e 'require_relative "almide_mathlib"; d = AlmideMathlib.distance(AlmideMathlib::Point.new(x:0.0,y:0.0), AlmideMathlib::Point.new(x:3.0,y:4.0)); puts d == 5.0 ? "PASS" : "FAIL"'
+              ln -sf libalmide_mathlib.so libalmide_mathlib 2>/dev/null || true
+              LD_LIBRARY_PATH=. ruby -e 'require_relative "almide_mathlib"; d = AlmideMathlib.distance(AlmideMathlib::Point.new(x:0.0,y:0.0), AlmideMathlib::Point.new(x:3.0,y:4.0)); puts d == 5.0 ? "PASS" : "FAIL"'
           - lang: swift
             setup: ""
             test: |
@@ -124,7 +125,7 @@ jobs:
               cp $GITHUB_WORKSPACE/almide_mathlib.cs $GITHUB_WORKSPACE/libalmide_mathlib.so .
               sed -i 's|</PropertyGroup>|<AllowUnsafeBlocks>true</AllowUnsafeBlocks></PropertyGroup>|' cstest.csproj
               printf 'using Almide.Mathlib;\nConsole.WriteLine(Bridge.Distance(new Point(0, 0), new Point(3, 4)));' > Program.cs
-              dotnet run | grep -q "5" && echo "PASS"
+              LD_LIBRARY_PATH=/tmp/cstest dotnet run | grep -q "5" && echo "PASS"
           - lang: dart
             setup: ""
             test: |
