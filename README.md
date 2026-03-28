@@ -98,20 +98,13 @@ fn area(shape: Shape) -> Float = match shape {
 
 **Python**
 ```python
-from almide_mathlib import Point, Shape, distance, area
-
+from almide_mathlib import Point, distance
 distance(Point(x=0, y=0), Point(x=3, y=4))  # 5.0
-area(Shape.circle(5.0))                       # 78.54
 ```
 
 **Go**
 ```go
-d := almide.Distance(almide.Point{X: 0, Y: 0}, almide.Point{X: 3, Y: 4})  // 5.0
-```
-
-**Swift**
-```swift
-let d = Mathlib.distance(Point(x: 0, y: 0), Point(x: 3, y: 4))  // 5.0
+d := almide.Distance(almide.Point{X: 0, Y: 0}, almide.Point{X: 3, Y: 4})
 ```
 
 **Ruby**
@@ -119,14 +112,89 @@ let d = Mathlib.distance(Point(x: 0, y: 0), Point(x: 3, y: 4))  // 5.0
 d = AlmideMathlib.distance(AlmideMathlib::Point.new(x: 0, y: 0), AlmideMathlib::Point.new(x: 3, y: 4))
 ```
 
+**Swift**
+```swift
+let d = Mathlib.distance(Point(x: 0, y: 0), Point(x: 3, y: 4))
+```
+
 **C#**
 ```csharp
-var d = Bridge.Distance(new Point(0, 0), new Point(3, 4));  // 5.0
+var d = Bridge.Distance(new Point(0, 0), new Point(3, 4));
+```
+
+**Dart**
+```dart
+final d = Mathlib.distance(Point(x: 0, y: 0), Point(x: 3, y: 4));
+```
+
+**Kotlin**
+```kotlin
+val d = Mathlib.distance(Point(0.0, 0.0), Point(3.0, 4.0))
+```
+
+**Java**
+```java
+double d = Mathlib.distance(new Point(0, 0), new Point(3, 4));
+```
+
+**C++**
+```cpp
+auto d = almide::distance(almide::Point{0, 0}, almide::Point{3, 4});
+```
+
+**Rust**
+```rust
+let d = almide_mathlib::distance(Point { x: 0.0, y: 0.0 }, Point { x: 3.0, y: 4.0 });
+```
+
+**JavaScript**
+```javascript
+const d = distance({x: 0, y: 0}, {x: 3, y: 4});  // 5.0
 ```
 
 **C**
 ```c
-double d = almide_distance(0, 0, 3, 4);  // 5.0
+double d = almide_distance(0, 0, 3, 4);
+```
+
+**Zig**
+```zig
+const d = almide.distance(Point{ .x = 0, .y = 0 }, Point{ .x = 3, .y = 4 });
+```
+
+**Nim**
+```nim
+let d = distance(Point(x: 0, y: 0), Point(x: 3, y: 4))
+```
+
+**Scala**
+```scala
+val d = Mathlib.distance(Point(0.0, 0.0), Point(3.0, 4.0))
+```
+
+**Julia**
+```julia
+d = distance(Point(0.0, 0.0), Point(3.0, 4.0))
+```
+
+**Elixir**
+```elixir
+d = AlmideMathlib.distance(%Point{x: 0.0, y: 0.0}, %Point{x: 3.0, y: 4.0})
+```
+
+**PHP**
+```php
+$d = AlmideMathlib::distance(new Point(0, 0), new Point(3, 4));
+```
+
+**Lua**
+```lua
+local d = almide.distance(Point.new(0, 0), Point.new(3, 4))
+```
+
+**PowerShell**
+```powershell
+$d = [AlmideMathlib]::Distance([Point]::new(0, 0), [Point]::new(3, 4))
 ```
 
 ## License
