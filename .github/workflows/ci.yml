@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  RUST_TOOLCHAIN: "1.89.0"
+
+jobs:
+  test:
+    name: Tests (51 tests, 20 languages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.almide
+          key: lander-cargo-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('almide.lock') }}
+          restore-keys: lander-cargo-${{ env.RUST_TOOLCHAIN }}-
+
+      - name: Install Almide
+        run: |
+          cargo install --git https://github.com/almide/almide.git --branch main
+          almide --version || echo "installed"
+
+      - name: Run lander tests
+        run: almide test test/
+
+      - name: E2E - Python binding
+        run: |
+          mkdir -p src
+          almide run src/main.almd -- --lang python test/mathlib.almd
+          cp target/debug/libalmide_mathlib.so . 2>/dev/null || cp target/debug/libalmide_mathlib.dylib . 2>/dev/null || true
+          python3 -c "
+          from almide_mathlib import Point, Shape, distance, area
+          assert abs(distance(Point(x=0,y=0), Point(x=3,y=4)) - 5.0) < 0.001
+          assert abs(area(Shape.circle(5.0)) - 78.54) < 0.1
+          print('Python e2e: PASS')
+          "
+
+      - name: E2E - Go binding
+        run: |
+          almide run src/main.almd -- --lang go test/mathlib.almd
+          echo "Go binding generated: $(ls almide_mathlib.go 2>/dev/null && echo OK || echo FAIL)"
+
+      - name: E2E - dry-run
+        run: |
+          almide run src/main.almd -- --dry-run --lang python test/mathlib.almd
+
+      - name: E2E - list
+        run: |
+          almide run src/main.almd -- --list

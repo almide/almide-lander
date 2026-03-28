@@ -3,6 +3,10 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/almide/almide-lander/actions"><img src="https://github.com/almide/almide-lander/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+</p>
+
+<p align="center">
   Export Almide modules as native packages for 20 languages.
 </p>
 
