@@ -1,5 +1,4 @@
 import self as lander
-import bindgen
 
 // ═══════════════════════════════════════════════════════
 // lang_ext
@@ -120,12 +119,12 @@ test "all lang_ext languages are supported" {
   }
 }
 
-test "supported_languages count is 20" {
-  assert_eq(list.len(bindgen.supported_languages()), 20)
-}
-
-test "bindgen version is not empty" {
-  assert(string.len(bindgen.version()) > 0)
+test "all 20 languages are supported" {
+  let all = ["python", "go", "ruby", "swift", "csharp", "dart",
+    "kotlin", "java", "c", "zig", "nim", "elixir", "php", "lua",
+    "cpp", "rust", "javascript", "scala", "julia", "powershell"]
+  assert_eq(list.len(all), 20)
+  for l in all { assert(lander.is_supported(l)) }
 }
 
 // ═══════════════════════════════════════════════════════
