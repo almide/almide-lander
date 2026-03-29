@@ -1,0 +1,87 @@
+// almide-lander library — reusable CLI utilities
+
+import bindgen
+
+// ── CLI argument parsing ──
+
+fn find_flag(args: List[String], flag: String) -> String =
+  args
+    |> list.enumerate
+    |> list.fold("", (acc, entry) => {
+      let (i, arg) = entry
+      if arg == flag then list.get(args, i + 1) ?? "" else acc
+    })
+
+fn has_flag(args: List[String], flag: String) -> Bool =
+  list.contains(args, flag)
+
+fn collect_positional(args: List[String]) -> List[String] =
+  list.fold(args, ([], false), (state, arg) => {
+    let (result, skip) = state
+    if skip then (result, false)
+    else if arg == "--lang" or arg == "--outdir" then (result, true)
+    else if string.starts_with(arg, "--") then (result, false)
+    else (result + [arg], false)
+  })
+  |> match { (result, _) => result }
+
+// ── Language file extension mapping ──
+
+fn lang_ext(lang: String) -> String =
+  match lang {
+    "python"     => "py",
+    "go"         => "go",
+    "ruby"       => "rb",
+    "swift"      => "swift",
+    "csharp"     => "cs",
+    "dart"       => "dart",
+    "kotlin"     => "kt",
+    "java"       => "java",
+    "c"          => "h",
+    "zig"        => "zig",
+    "nim"        => "nim",
+    "elixir"     => "ex",
+    "php"        => "php",
+    "lua"        => "lua",
+    "cpp"        => "hpp",
+    "rust"       => "rs",
+    "javascript" => "js",
+    "js"         => "js",
+    "scala"      => "scala",
+    "julia"      => "jl",
+    "powershell" => "ps1",
+    "ps"         => "ps1",
+    _            => "txt",
+  }
+
+// ── Generate binding for a specific language ──
+
+fn generate_binding(lang: String, iface_json: String) -> String =
+  match lang {
+    "python"     => bindgen.bindings.python.generate(iface_json),
+    "go"         => bindgen.bindings.go.generate(iface_json),
+    "ruby"       => bindgen.bindings.ruby.generate(iface_json),
+    "swift"      => bindgen.bindings.swift.generate(iface_json),
+    "csharp"     => bindgen.bindings.csharp.generate(iface_json),
+    "dart"       => bindgen.bindings.dart.generate(iface_json),
+    "kotlin"     => bindgen.bindings.kotlin.generate(iface_json),
+    "java"       => bindgen.bindings.java.generate(iface_json),
+    "c"          => bindgen.bindings.c.generate(iface_json),
+    "zig"        => bindgen.bindings.zig.generate(iface_json),
+    "nim"        => bindgen.bindings.nim.generate(iface_json),
+    "elixir"     => bindgen.bindings.elixir.generate(iface_json),
+    "php"        => bindgen.bindings.php.generate(iface_json),
+    "lua"        => bindgen.bindings.lua.generate(iface_json),
+    "cpp"        => bindgen.bindings.cpp.generate(iface_json),
+    "rust"       => bindgen.bindings.rust.generate(iface_json),
+    "javascript" => bindgen.bindings.javascript.generate(iface_json),
+    "js"         => bindgen.bindings.javascript.generate(iface_json),
+    "scala"      => bindgen.bindings.scala.generate(iface_json),
+    "julia"      => bindgen.bindings.julia.generate(iface_json),
+    "powershell" => bindgen.bindings.powershell.generate(iface_json),
+    "ps"         => bindgen.bindings.powershell.generate(iface_json),
+    _            => "",
+  }
+
+fn is_supported(lang: String) -> Bool =
+  list.contains(bindgen.supported_languages(), lang)

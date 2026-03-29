@@ -1,165 +1,122 @@
-// Tests for almide-lander CLI utilities
-
+import self as lander
 import bindgen
 
-// ── lang_ext ──
+// ═══════════════════════════════════════════════════════
+// lang_ext
+// ═══════════════════════════════════════════════════════
 
-fn lang_ext(lang: String) -> String = {
-  if lang == "python" then "py"
-  else if lang == "go" then "go"
-  else if lang == "ruby" then "rb"
-  else if lang == "swift" then "swift"
-  else if lang == "csharp" then "cs"
-  else if lang == "dart" then "dart"
-  else if lang == "kotlin" then "kt"
-  else if lang == "java" then "java"
-  else if lang == "c" then "h"
-  else if lang == "zig" then "zig"
-  else if lang == "nim" then "nim"
-  else if lang == "elixir" then "ex"
-  else if lang == "php" then "php"
-  else if lang == "lua" then "lua"
-  else if lang == "cpp" then "hpp"
-  else if lang == "rust" then "rs"
-  else if lang == "javascript" then "js"
-  else if lang == "scala" then "scala"
-  else if lang == "julia" then "jl"
-  else if lang == "powershell" then "ps1"  else "txt"
-}
+test "lang_ext python" { assert_eq(lander.lang_ext("python"), "py") }
+test "lang_ext go" { assert_eq(lander.lang_ext("go"), "go") }
+test "lang_ext ruby" { assert_eq(lander.lang_ext("ruby"), "rb") }
+test "lang_ext swift" { assert_eq(lander.lang_ext("swift"), "swift") }
+test "lang_ext csharp" { assert_eq(lander.lang_ext("csharp"), "cs") }
+test "lang_ext dart" { assert_eq(lander.lang_ext("dart"), "dart") }
+test "lang_ext kotlin" { assert_eq(lander.lang_ext("kotlin"), "kt") }
+test "lang_ext java" { assert_eq(lander.lang_ext("java"), "java") }
+test "lang_ext c" { assert_eq(lander.lang_ext("c"), "h") }
+test "lang_ext zig" { assert_eq(lander.lang_ext("zig"), "zig") }
+test "lang_ext nim" { assert_eq(lander.lang_ext("nim"), "nim") }
+test "lang_ext elixir" { assert_eq(lander.lang_ext("elixir"), "ex") }
+test "lang_ext php" { assert_eq(lander.lang_ext("php"), "php") }
+test "lang_ext lua" { assert_eq(lander.lang_ext("lua"), "lua") }
+test "lang_ext cpp" { assert_eq(lander.lang_ext("cpp"), "hpp") }
+test "lang_ext rust" { assert_eq(lander.lang_ext("rust"), "rs") }
+test "lang_ext javascript" { assert_eq(lander.lang_ext("javascript"), "js") }
+test "lang_ext js alias" { assert_eq(lander.lang_ext("js"), "js") }
+test "lang_ext scala" { assert_eq(lander.lang_ext("scala"), "scala") }
+test "lang_ext julia" { assert_eq(lander.lang_ext("julia"), "jl") }
+test "lang_ext powershell" { assert_eq(lander.lang_ext("powershell"), "ps1") }
+test "lang_ext ps alias" { assert_eq(lander.lang_ext("ps"), "ps1") }
+test "lang_ext unknown" { assert_eq(lander.lang_ext("brainfuck"), "txt") }
 
-test "lang_ext python" { assert_eq(lang_ext("python"), "py") }
-test "lang_ext go" { assert_eq(lang_ext("go"), "go") }
-test "lang_ext ruby" { assert_eq(lang_ext("ruby"), "rb") }
-test "lang_ext swift" { assert_eq(lang_ext("swift"), "swift") }
-test "lang_ext csharp" { assert_eq(lang_ext("csharp"), "cs") }
-test "lang_ext dart" { assert_eq(lang_ext("dart"), "dart") }
-test "lang_ext kotlin" { assert_eq(lang_ext("kotlin"), "kt") }
-test "lang_ext java" { assert_eq(lang_ext("java"), "java") }
-test "lang_ext c" { assert_eq(lang_ext("c"), "h") }
-test "lang_ext zig" { assert_eq(lang_ext("zig"), "zig") }
-test "lang_ext nim" { assert_eq(lang_ext("nim"), "nim") }
-test "lang_ext elixir" { assert_eq(lang_ext("elixir"), "ex") }
-test "lang_ext php" { assert_eq(lang_ext("php"), "php") }
-test "lang_ext lua" { assert_eq(lang_ext("lua"), "lua") }
-test "lang_ext unknown" { assert_eq(lang_ext("brainfuck"), "txt") }
-
-// ── find_flag ──
-
-fn find_flag(args: List[String], flag: String) -> String = {
-  var value = ""
-  var i = 0
-  for arg in args {
-    if arg == flag then {
-      value = list.get(args, i + 1) ?? ""
-    } else value = value
-    i = i + 1
-  }
-  value
-}
+// ═══════════════════════════════════════════════════════
+// find_flag
+// ═══════════════════════════════════════════════════════
 
 test "find_flag present" {
-  assert_eq(find_flag(["--lang", "python", "file.almd"], "--lang"), "python")
+  assert_eq(lander.find_flag(["--lang", "python", "file.almd"], "--lang"), "python")
 }
 
 test "find_flag absent" {
-  assert_eq(find_flag(["file.almd"], "--lang"), "")
+  assert_eq(lander.find_flag(["file.almd"], "--lang"), "")
 }
 
 test "find_flag at end" {
-  assert_eq(find_flag(["file.almd", "--lang"], "--lang"), "")
+  assert_eq(lander.find_flag(["file.almd", "--lang"], "--lang"), "")
 }
 
 test "find_flag multiple flags" {
-  assert_eq(find_flag(["--outdir", "out", "--lang", "go"], "--lang"), "go")
+  assert_eq(lander.find_flag(["--outdir", "out", "--lang", "go"], "--lang"), "go")
 }
 
 test "find_flag takes last value" {
-  assert_eq(find_flag(["--lang", "python", "--lang", "go"], "--lang"), "go")
+  assert_eq(lander.find_flag(["--lang", "python", "--lang", "go"], "--lang"), "go")
 }
 
-// ── has_flag ──
-
-fn has_flag(args: List[String], flag: String) -> Bool = {
-  var found = false
-  for arg in args {
-    if arg == flag then found = true else found = found
-  }
-  found
-}
+// ═══════════════════════════════════════════════════════
+// has_flag
+// ═══════════════════════════════════════════════════════
 
 test "has_flag present" {
-  assert_eq(has_flag(["--dry-run", "file.almd"], "--dry-run"), true)
+  assert_eq(lander.has_flag(["--dry-run", "file.almd"], "--dry-run"), true)
 }
 
 test "has_flag absent" {
-  assert_eq(has_flag(["file.almd"], "--dry-run"), false)
+  assert_eq(lander.has_flag(["file.almd"], "--dry-run"), false)
 }
 
 test "has_flag empty" {
-  assert_eq(has_flag([], "--dry-run"), false)
+  assert_eq(lander.has_flag([], "--dry-run"), false)
 }
 
-// ── collect_positional ──
-
-fn collect_positional(args: List[String]) -> List[String] = {
-  var result: List[String] = []
-  var skip_next = false
-  for arg in args {
-    if skip_next then {
-      skip_next = false
-    } else if arg == "--lang" or arg == "--outdir" then {
-      skip_next = true
-    } else if string.starts_with(arg, "--") then {
-      result = result
-    } else {
-      result = result + [arg]
-    }
-  }
-  result
-}
+// ═══════════════════════════════════════════════════════
+// collect_positional
+// ═══════════════════════════════════════════════════════
 
 test "collect_positional basic" {
-  assert_eq(collect_positional(["--lang", "python", "file.almd"]), ["file.almd"])
+  assert_eq(lander.collect_positional(["--lang", "python", "file.almd"]), ["file.almd"])
 }
 
 test "collect_positional no flags" {
-  assert_eq(collect_positional(["a.almd", "b.almd"]), ["a.almd", "b.almd"])
+  assert_eq(lander.collect_positional(["a.almd", "b.almd"]), ["a.almd", "b.almd"])
 }
 
 test "collect_positional skips boolean flags" {
-  assert_eq(collect_positional(["--dry-run", "file.almd"]), ["file.almd"])
+  assert_eq(lander.collect_positional(["--dry-run", "file.almd"]), ["file.almd"])
 }
 
 test "collect_positional complex" {
   assert_eq(
-    collect_positional(["--lang", "go", "--outdir", "dist", "--dry-run", "mylib.almd"]),
+    lander.collect_positional(["--lang", "go", "--outdir", "dist", "--dry-run", "mylib.almd"]),
     ["mylib.almd"]
   )
 }
 
-// ── is_supported ──
+// ═══════════════════════════════════════════════════════
+// is_supported
+// ═══════════════════════════════════════════════════════
 
-fn is_supported(lang: String) -> Bool = {
-  var found = false
-  for l in bindgen.supported_languages() {
-    if l == lang then found = true else found = found
-  }
-  found
-}
+test "is_supported python" { assert_eq(lander.is_supported("python"), true) }
+test "is_supported go" { assert_eq(lander.is_supported("go"), true) }
+test "is_supported rust" { assert_eq(lander.is_supported("rust"), true) }
+test "is_supported cpp" { assert_eq(lander.is_supported("cpp"), true) }
+test "is_supported javascript" { assert_eq(lander.is_supported("javascript"), true) }
+test "is_supported scala" { assert_eq(lander.is_supported("scala"), true) }
+test "is_supported julia" { assert_eq(lander.is_supported("julia"), true) }
+test "is_supported powershell" { assert_eq(lander.is_supported("powershell"), true) }
+test "is_supported empty" { assert_eq(lander.is_supported(""), false) }
 
-test "is_supported python" { assert_eq(is_supported("python"), true) }
-test "is_supported go" { assert_eq(is_supported("go"), true) }
-test "is_supported rust" { assert_eq(is_supported("rust"), true) }
-test "is_supported empty" { assert_eq(is_supported(""), false) }
-
-// ── bindgen.supported_languages consistency ──
+// ═══════════════════════════════════════════════════════
+// Consistency checks
+// ═══════════════════════════════════════════════════════
 
 test "all lang_ext languages are supported" {
   let langs = ["python", "go", "ruby", "swift", "csharp", "dart",
-    "kotlin", "java", "c", "zig", "nim", "elixir", "php", "lua"]
+    "kotlin", "java", "c", "zig", "nim", "elixir", "php", "lua",
+    "cpp", "rust", "javascript", "scala", "julia", "powershell"]
   for l in langs {
-    assert(is_supported(l), "language '${l}' should be supported")
-    assert(lang_ext(l) != "txt", "language '${l}' should have a file extension")
+    assert(lander.is_supported(l), "'${l}' should be supported")
+    assert(lander.lang_ext(l) != "txt", "'${l}' should have an extension")
   }
 }
 
@@ -167,13 +124,13 @@ test "supported_languages count is 20" {
   assert_eq(list.len(bindgen.supported_languages()), 20)
 }
 
-// ── bindgen.version ──
-
 test "bindgen version is not empty" {
-  assert(string.len(bindgen.version()) > 0, "version should not be empty")
+  assert(string.len(bindgen.version()) > 0)
 }
 
-// ── comma-separated lang parsing ──
+// ═══════════════════════════════════════════════════════
+// Comma-separated lang parsing
+// ═══════════════════════════════════════════════════════
 
 test "split single lang" {
   assert_eq(string.split("python", ","), ["python"])
@@ -186,43 +143,6 @@ test "split multiple langs" {
 test "split validates all" {
   let langs = string.split("python,go,swift", ",")
   for l in langs {
-    assert(is_supported(l), "${l} should be supported")
+    assert(lander.is_supported(l), "${l} should be supported")
   }
 }
-
-// ── step counter math ──
-
-test "step counter single lang" {
-  let lang_count = list.len(["python"])
-  let total_steps = 2 + lang_count
-  assert_eq(total_steps, 3)
-  assert_eq(int.to_string(total_steps), "3")
-}
-
-test "step counter multi lang" {
-  let lang_count = list.len(["python", "go", "swift"])
-  let total_steps = 2 + lang_count
-  assert_eq(total_steps, 5)
-}
-
-test "step increment" {
-  var step = 3
-  step = step + 1
-  assert_eq(step, 4)
-  assert_eq(int.to_string(step), "4")
-}
-
-// ── New languages (6 additions) ──
-
-test "lang_ext cpp" { assert_eq(lang_ext("cpp"), "hpp") }
-test "lang_ext rust" { assert_eq(lang_ext("rust"), "rs") }
-test "lang_ext javascript" { assert_eq(lang_ext("javascript"), "js") }
-test "lang_ext scala" { assert_eq(lang_ext("scala"), "scala") }
-test "lang_ext julia" { assert_eq(lang_ext("julia"), "jl") }
-test "lang_ext powershell" { assert_eq(lang_ext("powershell"), "ps1") }
-
-test "is_supported cpp" { assert_eq(is_supported("cpp"), true) }
-test "is_supported javascript" { assert_eq(is_supported("javascript"), true) }
-test "is_supported scala" { assert_eq(is_supported("scala"), true) }
-test "is_supported julia" { assert_eq(is_supported("julia"), true) }
-test "is_supported powershell" { assert_eq(is_supported("powershell"), true) }
