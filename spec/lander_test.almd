@@ -3,35 +3,101 @@ import self as lander
 // ═══════════════════════════════════════════════════════
 // lang_ext
 // ═══════════════════════════════════════════════════════
+test "lang_ext python" {
+  assert_eq(lander.lang_ext("python"), "py")
+}
 
-test "lang_ext python" { assert_eq(lander.lang_ext("python"), "py") }
-test "lang_ext go" { assert_eq(lander.lang_ext("go"), "go") }
-test "lang_ext ruby" { assert_eq(lander.lang_ext("ruby"), "rb") }
-test "lang_ext swift" { assert_eq(lander.lang_ext("swift"), "swift") }
-test "lang_ext csharp" { assert_eq(lander.lang_ext("csharp"), "cs") }
-test "lang_ext dart" { assert_eq(lander.lang_ext("dart"), "dart") }
-test "lang_ext kotlin" { assert_eq(lander.lang_ext("kotlin"), "kt") }
-test "lang_ext java" { assert_eq(lander.lang_ext("java"), "java") }
-test "lang_ext c" { assert_eq(lander.lang_ext("c"), "h") }
-test "lang_ext zig" { assert_eq(lander.lang_ext("zig"), "zig") }
-test "lang_ext nim" { assert_eq(lander.lang_ext("nim"), "nim") }
-test "lang_ext elixir" { assert_eq(lander.lang_ext("elixir"), "ex") }
-test "lang_ext php" { assert_eq(lander.lang_ext("php"), "php") }
-test "lang_ext lua" { assert_eq(lander.lang_ext("lua"), "lua") }
-test "lang_ext cpp" { assert_eq(lander.lang_ext("cpp"), "hpp") }
-test "lang_ext rust" { assert_eq(lander.lang_ext("rust"), "rs") }
-test "lang_ext javascript" { assert_eq(lander.lang_ext("javascript"), "js") }
-test "lang_ext js alias" { assert_eq(lander.lang_ext("js"), "js") }
-test "lang_ext scala" { assert_eq(lander.lang_ext("scala"), "scala") }
-test "lang_ext julia" { assert_eq(lander.lang_ext("julia"), "jl") }
-test "lang_ext powershell" { assert_eq(lander.lang_ext("powershell"), "ps1") }
-test "lang_ext ps alias" { assert_eq(lander.lang_ext("ps"), "ps1") }
-test "lang_ext unknown" { assert_eq(lander.lang_ext("brainfuck"), "txt") }
+test "lang_ext go" {
+  assert_eq(lander.lang_ext("go"), "go")
+}
+
+test "lang_ext ruby" {
+  assert_eq(lander.lang_ext("ruby"), "rb")
+}
+
+test "lang_ext swift" {
+  assert_eq(lander.lang_ext("swift"), "swift")
+}
+
+test "lang_ext csharp" {
+  assert_eq(lander.lang_ext("csharp"), "cs")
+}
+
+test "lang_ext dart" {
+  assert_eq(lander.lang_ext("dart"), "dart")
+}
+
+test "lang_ext kotlin" {
+  assert_eq(lander.lang_ext("kotlin"), "kt")
+}
+
+test "lang_ext java" {
+  assert_eq(lander.lang_ext("java"), "java")
+}
+
+test "lang_ext c" {
+  assert_eq(lander.lang_ext("c"), "h")
+}
+
+test "lang_ext zig" {
+  assert_eq(lander.lang_ext("zig"), "zig")
+}
+
+test "lang_ext nim" {
+  assert_eq(lander.lang_ext("nim"), "nim")
+}
+
+test "lang_ext elixir" {
+  assert_eq(lander.lang_ext("elixir"), "ex")
+}
+
+test "lang_ext php" {
+  assert_eq(lander.lang_ext("php"), "php")
+}
+
+test "lang_ext lua" {
+  assert_eq(lander.lang_ext("lua"), "lua")
+}
+
+test "lang_ext cpp" {
+  assert_eq(lander.lang_ext("cpp"), "hpp")
+}
+
+test "lang_ext rust" {
+  assert_eq(lander.lang_ext("rust"), "rs")
+}
+
+test "lang_ext javascript" {
+  assert_eq(lander.lang_ext("javascript"), "js")
+}
+
+test "lang_ext js alias" {
+  assert_eq(lander.lang_ext("js"), "js")
+}
+
+test "lang_ext scala" {
+  assert_eq(lander.lang_ext("scala"), "scala")
+}
+
+test "lang_ext julia" {
+  assert_eq(lander.lang_ext("julia"), "jl")
+}
+
+test "lang_ext powershell" {
+  assert_eq(lander.lang_ext("powershell"), "ps1")
+}
+
+test "lang_ext ps alias" {
+  assert_eq(lander.lang_ext("ps"), "ps1")
+}
+
+test "lang_ext unknown" {
+  assert_eq(lander.lang_ext("brainfuck"), "txt")
+}
 
 // ═══════════════════════════════════════════════════════
 // find_flag
 // ═══════════════════════════════════════════════════════
-
 test "find_flag present" {
   assert_eq(lander.find_flag(["--lang", "python", "file.almd"], "--lang"), "python")
 }
@@ -55,7 +121,6 @@ test "find_flag takes last value" {
 // ═══════════════════════════════════════════════════════
 // has_flag
 // ═══════════════════════════════════════════════════════
-
 test "has_flag present" {
   assert_eq(lander.has_flag(["--dry-run", "file.almd"], "--dry-run"), true)
 }
@@ -71,7 +136,6 @@ test "has_flag empty" {
 // ═══════════════════════════════════════════════════════
 // collect_positional
 // ═══════════════════════════════════════════════════════
-
 test "collect_positional basic" {
   assert_eq(lander.collect_positional(["--lang", "python", "file.almd"]), ["file.almd"])
 }
@@ -85,52 +149,119 @@ test "collect_positional skips boolean flags" {
 }
 
 test "collect_positional complex" {
-  assert_eq(
-    lander.collect_positional(["--lang", "go", "--outdir", "dist", "--dry-run", "mylib.almd"]),
-    ["mylib.almd"]
-  )
+  assert_eq(lander.collect_positional([
+    "--lang",
+    "go",
+    "--outdir",
+    "dist",
+    "--dry-run",
+    "mylib.almd"
+  ]), ["mylib.almd"])
 }
 
 // ═══════════════════════════════════════════════════════
 // is_supported
 // ═══════════════════════════════════════════════════════
+test "is_supported python" {
+  assert_eq(lander.is_supported("python"), true)
+}
 
-test "is_supported python" { assert_eq(lander.is_supported("python"), true) }
-test "is_supported go" { assert_eq(lander.is_supported("go"), true) }
-test "is_supported rust" { assert_eq(lander.is_supported("rust"), true) }
-test "is_supported cpp" { assert_eq(lander.is_supported("cpp"), true) }
-test "is_supported javascript" { assert_eq(lander.is_supported("javascript"), true) }
-test "is_supported scala" { assert_eq(lander.is_supported("scala"), true) }
-test "is_supported julia" { assert_eq(lander.is_supported("julia"), true) }
-test "is_supported powershell" { assert_eq(lander.is_supported("powershell"), true) }
-test "is_supported empty" { assert_eq(lander.is_supported(""), false) }
+test "is_supported go" {
+  assert_eq(lander.is_supported("go"), true)
+}
+
+test "is_supported rust" {
+  assert_eq(lander.is_supported("rust"), true)
+}
+
+test "is_supported cpp" {
+  assert_eq(lander.is_supported("cpp"), true)
+}
+
+test "is_supported javascript" {
+  assert_eq(lander.is_supported("javascript"), true)
+}
+
+test "is_supported scala" {
+  assert_eq(lander.is_supported("scala"), true)
+}
+
+test "is_supported julia" {
+  assert_eq(lander.is_supported("julia"), true)
+}
+
+test "is_supported powershell" {
+  assert_eq(lander.is_supported("powershell"), true)
+}
+
+test "is_supported empty" {
+  assert_eq(lander.is_supported(""), false)
+}
 
 // ═══════════════════════════════════════════════════════
 // Consistency checks
 // ═══════════════════════════════════════════════════════
-
 test "all lang_ext languages are supported" {
-  let langs = ["python", "go", "ruby", "swift", "csharp", "dart",
-    "kotlin", "java", "c", "zig", "nim", "elixir", "php", "lua",
-    "cpp", "rust", "javascript", "scala", "julia", "powershell"]
+  let langs = [
+    "python",
+    "go",
+    "ruby",
+    "swift",
+    "csharp",
+    "dart",
+    "kotlin",
+    "java",
+    "c",
+    "zig",
+    "nim",
+    "elixir",
+    "php",
+    "lua",
+    "cpp",
+    "rust",
+    "javascript",
+    "scala",
+    "julia",
+    "powershell"
+  ];
   for l in langs {
-    assert(lander.is_supported(l), "'${l}' should be supported")
-    assert(lander.lang_ext(l) != "txt", "'${l}' should have an extension")
+    assert(lander.is_supported(l), "'${l}' should be supported");
+    assert(lander.lang_ext(l) != "txt", "'${l}' should have an extension");
   }
 }
 
 test "all 20 languages are supported" {
-  let all = ["python", "go", "ruby", "swift", "csharp", "dart",
-    "kotlin", "java", "c", "zig", "nim", "elixir", "php", "lua",
-    "cpp", "rust", "javascript", "scala", "julia", "powershell"]
-  assert_eq(list.len(all), 20)
-  for l in all { assert(lander.is_supported(l)) }
+  let all = [
+    "python",
+    "go",
+    "ruby",
+    "swift",
+    "csharp",
+    "dart",
+    "kotlin",
+    "java",
+    "c",
+    "zig",
+    "nim",
+    "elixir",
+    "php",
+    "lua",
+    "cpp",
+    "rust",
+    "javascript",
+    "scala",
+    "julia",
+    "powershell"
+  ];
+  assert_eq(list.len(all), 20);
+  for l in all {
+    assert(lander.is_supported(l));
+  }
 }
 
 // ═══════════════════════════════════════════════════════
 // Comma-separated lang parsing
 // ═══════════════════════════════════════════════════════
-
 test "split single lang" {
   assert_eq(string.split("python", ","), ["python"])
 }
@@ -140,8 +271,8 @@ test "split multiple langs" {
 }
 
 test "split validates all" {
-  let langs = string.split("python,go,swift", ",")
+  let langs = string.split("python,go,swift", ",");
   for l in langs {
-    assert(lander.is_supported(l), "${l} should be supported")
+    assert(lander.is_supported(l), "${l} should be supported");
   }
 }
