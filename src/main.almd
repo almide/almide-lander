@@ -99,7 +99,8 @@ effect fn main() -> Unit = {
                  else process.exec("cargo", ["build"])!
     println("  OK")
 
-    langs |> list.enumerate |> list.each((entry) => {
+    let indexed_langs = langs |> list.enumerate
+    for entry in indexed_langs {
       let (i, lang) = entry
       let step = 3 + i
       println("[${int.to_string(step)}/${int.to_string(total)}] Generating ${lang} binding...")
@@ -108,7 +109,7 @@ effect fn main() -> Unit = {
                      else "almide_${module_name}.${lander.lang_ext(lang)}"
       fs.write(filename, code)!
       println("  ${filename}")
-    })
+    }
 
     println("\nDone. Generated ${int.to_string(lang_count)} binding(s) for ${module_name}.")
   }
