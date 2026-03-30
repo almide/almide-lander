@@ -12,7 +12,7 @@ env:
 jobs:
   # ── Unit tests ──
   unit-tests:
-    name: Unit Tests (51 tests)
+    name: Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
       - name: Install Almide
         run: cargo install --git https://github.com/almide/almide.git --branch develop
       - name: Run tests
-        run: almide test test/
+        run: almide test spec/
 
   # ── Build shared library (shared by all e2e jobs) ──
   build-lib:
@@ -54,7 +54,7 @@ jobs:
       - name: Generate & build
         run: |
           mkdir -p src
-          almide run src/main.almd -- --lang python test/mathlib.almd
+          almide run src/main.almd -- --lang python spec/mathlib.almd
           ln -sf libalmide_mathlib.so libalmide_mathlib.dylib 2>/dev/null || true
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -217,7 +217,7 @@ jobs:
       - name: Generate ${{ matrix.lang }} binding
         run: |
           mkdir -p src
-          almide run src/main.almd -- --lang ${{ matrix.lang }} test/mathlib.almd
+          almide run src/main.almd -- --lang ${{ matrix.lang }} spec/mathlib.almd
           # Ensure shared library is accessible
           cp target/debug/libalmide_mathlib.so . 2>/dev/null || true
           ln -sf libalmide_mathlib.so libalmide_mathlib.dylib 2>/dev/null || true

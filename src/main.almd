@@ -10,6 +10,7 @@ import self as lander
 import process
 import fs
 import json
+import env
 import bindgen
 
 // ── Help text ──
