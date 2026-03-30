@@ -1,6 +1,26 @@
 // almide-lander library — reusable CLI utilities
 
 import bindgen
+import bindgen.bindings.python
+import bindgen.bindings.go
+import bindgen.bindings.ruby
+import bindgen.bindings.swift
+import bindgen.bindings.csharp
+import bindgen.bindings.dart
+import bindgen.bindings.kotlin
+import bindgen.bindings.java
+import bindgen.bindings.c
+import bindgen.bindings.zig
+import bindgen.bindings.nim
+import bindgen.bindings.elixir
+import bindgen.bindings.php
+import bindgen.bindings.lua
+import bindgen.bindings.cpp
+import bindgen.bindings.rust as rust_bind
+import bindgen.bindings.javascript
+import bindgen.bindings.scala
+import bindgen.bindings.julia
+import bindgen.bindings.powershell
 
 // ── CLI argument parsing ──
 
@@ -58,28 +78,28 @@ fn lang_ext(lang: String) -> String =
 
 fn generate_binding(lang: String, iface_json: String) -> String =
   match lang {
-    "python"     => bindgen.bindings.python.generate(iface_json),
-    "go"         => bindgen.bindings.go.generate(iface_json),
-    "ruby"       => bindgen.bindings.ruby.generate(iface_json),
-    "swift"      => bindgen.bindings.swift.generate(iface_json),
-    "csharp"     => bindgen.bindings.csharp.generate(iface_json),
-    "dart"       => bindgen.bindings.dart.generate(iface_json),
-    "kotlin"     => bindgen.bindings.kotlin.generate(iface_json),
-    "java"       => bindgen.bindings.java.generate(iface_json),
-    "c"          => bindgen.bindings.c.generate(iface_json),
-    "zig"        => bindgen.bindings.zig.generate(iface_json),
-    "nim"        => bindgen.bindings.nim.generate(iface_json),
-    "elixir"     => bindgen.bindings.elixir.generate(iface_json),
-    "php"        => bindgen.bindings.php.generate(iface_json),
-    "lua"        => bindgen.bindings.lua.generate(iface_json),
-    "cpp"        => bindgen.bindings.cpp.generate(iface_json),
-    "rust"       => bindgen.bindings.rust.generate(iface_json),
-    "javascript" => bindgen.bindings.javascript.generate(iface_json),
-    "js"         => bindgen.bindings.javascript.generate(iface_json),
-    "scala"      => bindgen.bindings.scala.generate(iface_json),
-    "julia"      => bindgen.bindings.julia.generate(iface_json),
-    "powershell" => bindgen.bindings.powershell.generate(iface_json),
-    "ps"         => bindgen.bindings.powershell.generate(iface_json),
+    "python"     => python.generate(iface_json),
+    "go"         => go.generate(iface_json),
+    "ruby"       => ruby.generate(iface_json),
+    "swift"      => swift.generate(iface_json),
+    "csharp"     => csharp.generate(iface_json),
+    "dart"       => dart.generate(iface_json),
+    "kotlin"     => kotlin.generate(iface_json),
+    "java"       => java.generate(iface_json),
+    "c"          => c.generate(iface_json),
+    "zig"        => zig.generate(iface_json),
+    "nim"        => nim.generate(iface_json),
+    "elixir"     => elixir.generate(iface_json),
+    "php"        => php.generate(iface_json),
+    "lua"        => lua.generate(iface_json),
+    "cpp"        => cpp.generate(iface_json),
+    "rust"       => rust_bind.generate(iface_json),
+    "javascript" => javascript.generate(iface_json),
+    "js"         => javascript.generate(iface_json),
+    "scala"      => scala.generate(iface_json),
+    "julia"      => julia.generate(iface_json),
+    "powershell" => powershell.generate(iface_json),
+    "ps"         => powershell.generate(iface_json),
     _            => "",
   }
 

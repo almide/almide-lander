@@ -12,6 +12,7 @@ import fs
 import json
 import env
 import bindgen
+import bindgen.scaffolding
 
 // ── Help text ──
 
@@ -87,8 +88,8 @@ effect fn main() -> Unit = {
   } else {
     println("[2/${int.to_string(total)}] Building shared library...")
     let rust_source = process.exec("almide", [source_path, "--target", "rust", "--repr-c"])!
-    let scaffolding_rs = bindgen.scaffolding.generate(iface_json, rust_source)
-    let cargo_toml = bindgen.scaffolding.generate_cargo(iface_json)
+    let scaffolding_rs = scaffolding.generate(iface_json, rust_source)
+    let cargo_toml = scaffolding.generate_cargo(iface_json)
     let out_src = if outdir != "" then "${outdir}/src" else "src"
     fs.mkdir_p(out_src)!
     fs.write("${out_src}/lib.rs", scaffolding_rs)!
