@@ -55,11 +55,11 @@ effect fn main() -> Unit = {
     process.exit(0)
   }
 
-  guard lang_flag != "" else { print_help(); process.exit(1) }
+  if lang_flag == "" then { print_help(); process.exit(1) }
 
   let langs = string.split(lang_flag, ",")
   let invalid = langs |> list.filter((l) => not lander.is_supported(l))
-  guard list.is_empty(invalid) else {
+  if not list.is_empty(invalid) then {
     for l in invalid { println("Error: unsupported language '${l}'") }
     println("\nSupported: ${bindgen.supported_languages() |> list.join(", ")}")
     process.exit(1)
@@ -67,7 +67,7 @@ effect fn main() -> Unit = {
 
   let positional = lander.collect_positional(args)
   let source_path = list.get(positional, 0) ?? ""
-  guard source_path != "" else {
+  if source_path == "" then {
     println("Error: no .almd source file specified")
     println("\nUsage: almide run src/main.almd -- --lang ${lang_flag} <source.almd>")
     process.exit(1)
