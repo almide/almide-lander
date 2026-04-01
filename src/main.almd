@@ -87,16 +87,19 @@ effect fn main() -> Unit = {
     println(lander.generate_binding(first_lang, iface_json))
   } else {
     println("[2/${int.to_string(total)}] Building shared library...")
-    let rust_source = process.exec("almide", [source_path, "--target", "rust", "--repr-c"])!
-    let scaffolding_rs = scaffolding.generate(iface_json, rust_source)
-    let cargo_toml = scaffolding.generate_cargo(iface_json)
-    let out_src = if outdir != "" then "${outdir}/src" else "src"
-    fs.mkdir_p(out_src)!
-    fs.write("${out_src}/lib.rs", scaffolding_rs)!
-    let cargo_path = if outdir != "" then "${outdir}/Cargo.toml" else "Cargo.toml"
-    fs.write(cargo_path, cargo_toml)!
-    let _build = if outdir != "" then process.exec("cargo", ["build", "--manifest-path", cargo_path])!
-                 else process.exec("cargo", ["build"])!
+    // Read original source and generate Almide scaffolding with @export(c) bridges
+    let source_content = fs.read_text(source_path)!
+    // Extract imports from source and move them to the top (scaffold has its own imports)
+    let source_lines = string.lines(source_content)
+    let import_lines = source_lines |> list.filter((l) => string.starts_with(l, "import "))
+    let non_import_lines = source_lines |> list.filter((l) => not string.starts_with(l, "import "))
+    let scaffold_almd = scaffolding.generate(iface_json)
+    let full_source = (import_lines |> list.join("\n")) + "\n" + scaffold_almd + "\n" + (non_import_lines |> list.join("\n"))
+    let scaffold_path = if outdir != "" then "${outdir}/_scaffold.almd" else "_scaffold.almd"
+    fs.write(scaffold_path, full_source)!
+    let _build = process.exec("almide", ["build", scaffold_path, "--cdylib", "-o", "almide_${module_name}", "--repr-c"])!
+    // Clean up scaffold
+    let _ = fs.remove(scaffold_path)
     println("  OK")
 
     let indexed_langs = langs |> list.enumerate
