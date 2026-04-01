@@ -1,7 +1,6 @@
 // almide-lander library — reusable CLI utilities
 
 import bindgen
-import bindgen.bindings.almide as almide_bind
 import bindgen.bindings.python
 import bindgen.bindings.go
 import bindgen.bindings.ruby
@@ -19,6 +18,7 @@ import bindgen.bindings.lua
 import bindgen.bindings.cpp
 import bindgen.bindings.rust as rust_bind
 import bindgen.bindings.javascript
+import bindgen.bindings.almide as almide_bind
 import bindgen.bindings.scala
 import bindgen.bindings.julia
 import bindgen.bindings.powershell
@@ -50,7 +50,6 @@ fn collect_positional(args: List[String]) -> List[String] =
 
 fn lang_ext(lang: String) -> String =
   match lang {
-    "almide"     => "almd",
     "python"     => "py",
     "go"         => "go",
     "ruby"       => "rb",
@@ -80,7 +79,6 @@ fn lang_ext(lang: String) -> String =
 
 fn generate_binding(lang: String, iface_json: String) -> String =
   match lang {
-    "almide"     => almide_bind.generate(iface_json),
     "python"     => python.generate(iface_json),
     "go"         => go.generate(iface_json),
     "ruby"       => ruby.generate(iface_json),
@@ -103,6 +101,8 @@ fn generate_binding(lang: String, iface_json: String) -> String =
     "julia"      => julia.generate(iface_json),
     "powershell" => powershell.generate(iface_json),
     "ps"         => powershell.generate(iface_json),
+    "almide"     => almide_bind.generate(iface_json),
+    "almd"       => almide_bind.generate(iface_json),
     _            => "",
   }
 
