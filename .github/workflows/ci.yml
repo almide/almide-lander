@@ -61,7 +61,7 @@ jobs:
         with:
           name: build-artifacts
           path: |
-            target/debug/libalmide_mathlib.so
+            libalmide_mathlib.so
             almide_mathlib.*
           retention-days: 1
 
@@ -218,8 +218,7 @@ jobs:
         run: |
           mkdir -p src
           almide run src/main.almd -- --lang ${{ matrix.lang }} spec/mathlib.almd
-          # Ensure shared library is accessible
-          cp target/debug/libalmide_mathlib.so . 2>/dev/null || true
+          # Ensure shared library is accessible (almide build --cdylib outputs to cwd)
           ln -sf libalmide_mathlib.so libalmide_mathlib.dylib 2>/dev/null || true
       - name: Test ${{ matrix.lang }}
         run: ${{ matrix.test }}
