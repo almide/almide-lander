@@ -7,10 +7,11 @@
 </p>
 
 <p align="center">
-  Export Almide modules as native packages for 20 languages.
+  Export Almide modules as native packages for 21 languages.
 </p>
 
 <p align="center">
+  <img alt="Almide" src="https://img.shields.io/badge/-Almide-d8d8dc?style=flat-square&logo=data:image/png;base64,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">
   <img alt="Python" src="https://img.shields.io/badge/-Python-3776AB?style=flat-square&logo=python&logoColor=white">
   <img alt="Go" src="https://img.shields.io/badge/-Go%C2%A0%C2%A0%C2%A0%C2%A0-00ADD8?style=flat-square&logo=go&logoColor=white">
   <img alt="Ruby" src="https://img.shields.io/badge/-Ruby%C2%A0%C2%A0-BB1200?style=flat-square&logo=ruby&logoColor=white">
@@ -44,12 +45,12 @@
 
 ## What is this?
 
-Write a library in Almide. Run one command. Use it from 20 languages.
+Write a library in Almide. Run one command. Use it from 21 languages.
 
 ```bash
 almide run src/main.almd -- --lang python mylib.almd
 almide run src/main.almd -- --lang python,go,swift mylib.almd   # multiple at once
-almide run src/main.almd -- --list                               # show all 20
+almide run src/main.almd -- --list                               # show all 21
 almide run src/main.almd -- --dry-run --lang ruby mylib.almd     # preview
 ```
 
@@ -68,10 +69,10 @@ mylib.almd
 ## Architecture
 
 ```
-almide-bindgen (library, 20 generators)     almide-lander (this repo, CLI)
+almide-bindgen (library, 21 generators)     almide-lander (this repo, CLI)
 ├── src/mod.almd                            ├── almide.toml → depends on bindgen
 ├── src/scaffolding.almd                    ├── src/main.almd → import bindgen
-└── src/bindings/ (20 .almd files)          └── test/ (51 tests)
+└── src/bindings/ (21 .almd files)          └── test/ (51 tests)
 ```
 
 Everything is written in Almide. No Python, no external tool dependencies.
