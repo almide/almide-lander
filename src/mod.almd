@@ -22,6 +22,10 @@ import bindgen.bindings.almide as almide_bind
 import bindgen.bindings.scala
 import bindgen.bindings.julia
 import bindgen.bindings.powershell
+import wasm_bindgen
+import process
+import fs
+import json
 
 // ── CLI argument parsing ──
 
@@ -40,7 +44,8 @@ fn collect_positional(args: List[String]) -> List[String] =
   list.fold(args, ([], false), (state, arg) => {
     let (result, skip) = state
     if skip then (result, false)
-    else if arg == "--lang" or arg == "--outdir" then (result, true)
+    else if arg == "--lang" or arg == "--outdir" or arg == "--target"
+         or arg == "--pkg-version" then (result, true)
     else if string.starts_with(arg, "--") then (result, false)
     else (result + [arg], false)
   })
@@ -108,3 +113,89 @@ fn generate_binding(lang: String, iface_json: String) -> String =
 
 fn is_supported(lang: String) -> Bool =
   list.contains(bindgen.supported_languages(), lang)
+
+// ── WASM target pipeline ──
+//
+// Builds a WASM module from Almide source and emits npm-ready JS/TS glue
+// (ESM + .d.ts + package.json). Parallels the native FFI path in main.almd
+// but uses almide-wasm-bindgen instead of almide-bindgen + koffi/ctypes/...
+//
+// Triggered by: almide run src/main.almd -- --target wasm <source.almd>
+// Optional flag: --outdir <dir> (default: current directory)
+
+effect fn run_wasm_target(args: List[String]) -> Unit = {
+  let outdir_flag = find_flag(args, "--outdir")
+  let outdir = if outdir_flag == "" then "." else outdir_flag
+  let pkg_version_flag = find_flag(args, "--pkg-version")
+  let pkg_version = if pkg_version_flag == "" then "0.1.0" else pkg_version_flag
+  let do_publish = has_flag(args, "--publish")
+  let do_publish_dry = has_flag(args, "--publish-dry-run")
+  let skip_wasm_opt = has_flag(args, "--no-wasm-opt")
+  let positional = collect_positional(args)
+  let source_path = list.get(positional, 0) ?? ""
+
+  if source_path == "" then {
+    println("Error: no .almd source file specified")
+    println("\nUsage:")
+    println("  almide run src/main.almd -- --target wasm [--outdir <dir>] [--pkg-version <v>]")
+    println("                                [--publish | --publish-dry-run] [--no-wasm-opt] <source.almd>")
+    process.exit(1)
+  }
+
+  let _mkdir = fs.mkdir_p(outdir)!
+
+  println("[1/4] Compiling interface from ${source_path}...")
+  let iface_json = process.exec("almide", ["compile", source_path, "--json"])!
+  let iface = json.parse(iface_json) ?? json.null()
+  let module_name = json.as_string(json.get(iface, "module") ?? json.from_string("module")) ?? "module"
+
+  let wasm_path = "${outdir}/${module_name}.wasm"
+  println("[2/4] Building ${wasm_path} (--target wasm)...")
+  let _build = process.exec("almide", ["build", source_path, "-o", wasm_path, "--target", "wasm"])!
+
+  // Default-on wasm-opt: publish/deploy artefact なので size を縮めて出したい。
+  // --no-wasm-opt で opt-out。wasm-opt 未インストールでも lander を落とさないよう
+  // sh -c 経由で status を確認、無ければ skip 通知だけ出す。
+  if not skip_wasm_opt then {
+    let check = process.exec("sh", ["-c", "command -v wasm-opt >/dev/null 2>&1 && echo yes || echo no"])!
+    if string.trim(check) == "yes" then {
+      // --enable-bulk-memory: Almide's matrix runtime emits memory.fill
+      //   for zero-init of the result buffer. Without the flag wasm-opt
+      //   refuses to load and the build silently stalls.
+      // --enable-simd: keep iter 43's f64x2 instructions (matrix.scale/add/sub/div/fma).
+      println("[2.5/4] wasm-opt -O3 --enable-simd --enable-bulk-memory ${wasm_path}")
+      let _opt = process.exec("wasm-opt", ["-O3", "--enable-simd", "--enable-bulk-memory", wasm_path, "-o", wasm_path])!
+    } else {
+      println("[2.5/4] wasm-opt not found on PATH — skipping size optimization")
+      println("        (install via: brew install binaryen | npm i -g binaryen)")
+    }
+  }
+
+  println("[3/4] Generating ESM glue + .d.ts + .wit + package.json (v${pkg_version})...")
+  let esm = wasm_bindgen.generate_esm(iface_json, module_name)
+  let dts = wasm_bindgen.generate_dts(iface_json, module_name)
+  let wit = wasm_bindgen.generate_wit(iface_json, module_name)
+  let pkg = wasm_bindgen.generate_package_json(module_name, pkg_version)
+
+  fs.write("${outdir}/${module_name}.js", esm)!
+  fs.write("${outdir}/${module_name}.d.ts", dts)!
+  fs.write("${outdir}/${module_name}.wit", wit)!
+  fs.write("${outdir}/package.json", pkg)!
+
+  println("[4/4] Done.")
+  println("  ${wasm_path}")
+  println("  ${outdir}/${module_name}.js")
+  println("  ${outdir}/${module_name}.d.ts")
+  println("  ${outdir}/${module_name}.wit")
+  println("  ${outdir}/package.json")
+
+  // Optional: run npm publish from the outdir. process.exec does not take
+  // a cwd, so shell out via `sh -c`. --publish-dry-run is for CI smoke tests.
+  if do_publish or do_publish_dry then {
+    let npm_args = if do_publish_dry then " --dry-run" else ""
+    let cmd = "cd ${outdir} && npm publish${npm_args}"
+    println("\n[publish] ${cmd}")
+    let out = process.exec("sh", ["-c", cmd])!
+    println(out)
+  }
+}

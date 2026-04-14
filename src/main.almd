@@ -44,6 +44,7 @@ effect fn main() -> Unit = {
   let args = env.args()
   let lang_flag = lander.find_flag(args, "--lang")
   let outdir = lander.find_flag(args, "--outdir")
+  let target = lander.find_flag(args, "--target")
   let dry_run = lander.has_flag(args, "--dry-run")
 
   if lander.has_flag(args, "--list") then {
@@ -52,6 +53,13 @@ effect fn main() -> Unit = {
     for l in bindgen.supported_languages() {
       println("  ${l}  (.${lander.lang_ext(l)})")
     }
+    process.exit(0)
+  }
+
+  // --target wasm: WASM + JS/TS binding pipeline via almide-wasm-bindgen.
+  // Completely separate from the native FFI (cdylib + byte-buffer) path.
+  if target == "wasm" then {
+    lander.run_wasm_target(args)
     process.exit(0)
   }
 
