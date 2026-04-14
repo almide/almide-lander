@@ -45,34 +45,49 @@
 
 ## What is this?
 
-Write a library in Almide. Run one command. Use it from 21 languages.
+Write a library in Almide. Run one command. Use it from **21 languages plus npm/Wasm**.
 
 ```bash
+# Native FFI — 21 languages via cdylib + byte-buffer protocol
 almide run src/main.almd -- --lang python mylib.almd
 almide run src/main.almd -- --lang python,go,swift mylib.almd   # multiple at once
 almide run src/main.almd -- --list                               # show all 21
 almide run src/main.almd -- --dry-run --lang ruby mylib.almd     # preview
+
+# WebAssembly + JS/TS — npm-publishable bundle (delegates to almide-wasm-bindgen)
+almide run src/main.almd -- --target wasm --outdir dist mylib.almd
+almide run src/main.almd -- --target wasm --outdir dist --pkg-version 1.0.0 mylib.almd
+almide run src/main.almd -- --target wasm --outdir dist --publish-dry-run mylib.almd
+almide run src/main.almd -- --target wasm --outdir dist --publish mylib.almd
 ```
 
-No runtime. No VM. Almide disappears — only a native shared library and a pure language wrapper remain.
+The `--target wasm` path produces an npm-ready `dist/`:
+`<mod>.wasm`, `<mod>.js` (ESM glue), `<mod>.d.ts` (TS types), `<mod>.wit` (Component Model interface), `package.json`. `cd dist && npm publish` works directly.
+
+No runtime. No VM. Almide disappears — only a native shared library, or a Wasm + ESM + TS package, remains.
 
 ## How it works
 
 ```
 mylib.almd
     │
-    ├─ [1/N] almide compile --json             → interface.json
-    ├─ [2/N] almide --target rust --repr-c     → source.rs + cargo build → .so/.dylib
-    └─ [3/N] bindgen.bindings.<lang>.generate() → almide_mylib.py / .go / .swift / ...
+    ├─[ --lang python ]──→ scaffold (cdylib + repr-c) → almide_mylib.py
+    │                                                   (or .go / .swift / ...)
+    │
+    └─[ --target wasm ]──→ almide build --target wasm  → mylib.wasm
+                          + wasm_bindgen.generate_*    → mylib.{js,d.ts,wit} + package.json
 ```
 
 ## Architecture
 
 ```
 almide-bindgen (library, 21 generators)     almide-lander (this repo, CLI)
-├── src/mod.almd                            ├── almide.toml → depends on bindgen
-├── src/scaffolding.almd                    ├── src/main.almd → import bindgen
-└── src/bindings/ (21 .almd files)          └── test/ (51 tests)
+├── src/mod.almd                            ├── almide.toml → depends on bindgen + wasm_bindgen
+├── src/scaffolding.almd                    ├── src/main.almd → dispatches by --target
+└── src/bindings/ (21 .almd files)          └── src/mod.almd → run_wasm_target
+
+almide-wasm-bindgen (library, WASM + JS/TS + WIT generator)
+└── src/mod.almd                            ─── used by lander when --target wasm
 ```
 
 Everything is written in Almide. No Python, no external tool dependencies.
