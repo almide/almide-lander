@@ -11,3 +11,7 @@ source.rs
 almide_mathlib.*
 !almide-lander.jpeg
 !src/main.almd
+
+/lander
+almide_testlib.*
+almide_test_lib.txt
