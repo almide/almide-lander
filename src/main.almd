@@ -86,8 +86,8 @@ effect fn main() -> Unit = {
 
   println("[1/${int.to_string(total)}] Compiling interface from ${source_path}...")
   let iface_json = process.exec("almide", ["compile", source_path, "--json"])!
-  let iface = json.parse(iface_json) ?? json.null()
-  let module_name = json.as_string(json.get(iface, "module") ?? json.from_string("module")) ?? "module"
+  let iface = json.parse(iface_json) ?? value.null()
+  let module_name = value.as_string(value.get(iface, "module") ?? value.string("module"))? ?? "module"
 
   if dry_run then {
     let first_lang = list.get(langs, 0) ?? "python"
@@ -104,7 +104,7 @@ effect fn main() -> Unit = {
     let scaffold_almd = scaffolding.generate(iface_json)
     let full_source = (import_lines |> list.join("\n")) + "\n" + scaffold_almd + "\n" + (non_import_lines |> list.join("\n"))
     let scaffold_path = if outdir != "" then "${outdir}/_scaffold.almd" else "_scaffold.almd"
-    fs.write(scaffold_path, full_source)!
+    fs.write_text(scaffold_path, full_source)!
     let _build = process.exec("almide", ["build", scaffold_path, "--cdylib", "-o", "almide_${module_name}", "--repr-c"])!
     // Clean up scaffold
     let _ = fs.remove(scaffold_path)
@@ -118,7 +118,7 @@ effect fn main() -> Unit = {
       let code = lander.generate_binding(lang, iface_json)
       let filename = if outdir != "" then "${outdir}/almide_${module_name}.${lander.lang_ext(lang)}"
                      else "almide_${module_name}.${lander.lang_ext(lang)}"
-      fs.write(filename, code)!
+      fs.write_text(filename, code)!
       println("  ${filename}")
     }
 
