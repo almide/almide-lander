@@ -59,7 +59,7 @@ effect fn main() -> Unit = {
   // --target wasm: WASM + JS/TS binding pipeline via almide-wasm-bindgen.
   // Completely separate from the native FFI (cdylib + byte-buffer) path.
   if target == "wasm" then {
-    lander.run_wasm_target(args)
+    lander.run_wasm_target(args)!
     process.exit(0)
   }
 
