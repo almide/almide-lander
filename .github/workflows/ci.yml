@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 env:
-  RUST_TOOLCHAIN: "1.89.0"
+  RUST_TOOLCHAIN: "1.97.0"
 
 jobs:
   # ── Unit tests ──
