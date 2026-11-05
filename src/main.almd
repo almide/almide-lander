@@ -105,7 +105,13 @@ effect fn main() -> Unit = {
     let full_source = (import_lines |> list.join("\n")) + "\n" + scaffold_almd + "\n" + (non_import_lines |> list.join("\n"))
     let scaffold_path = if outdir != "" then "${outdir}/_scaffold.almd" else "_scaffold.almd"
     fs.write_text(scaffold_path, full_source)!
-    let _build = process.exec("almide", ["build", scaffold_path, "--cdylib", "-o", "almide_${module_name}", "--repr-c"])!
+    // `almide build -o` writes the path exactly as given (#3349), so name the library the way the bindings load it
+    let lib_file = match env.os() {
+      "windows" => "almide_${module_name}.dll",
+      "macos" => "libalmide_${module_name}.dylib",
+      _ => "libalmide_${module_name}.so",
+    }
+    let _build = process.exec("almide", ["build", scaffold_path, "--cdylib", "-o", lib_file, "--repr-c"])!
     // Clean up scaffold
     let _ = fs.remove(scaffold_path)
     println("  OK")
