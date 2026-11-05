@@ -4,5 +4,4 @@ version = "0.2.0"
 
 [dependencies]
 bindgen = { git = "https://github.com/almide/almide-bindgen.git" }
-# TODO(post-publish): swap file:// to https://github.com/almide/almide-wasm-bindgen.git
 wasm_bindgen = { git = "https://github.com/almide/almide-wasm-bindgen.git" }
