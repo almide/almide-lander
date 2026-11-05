@@ -1,4 +1,4 @@
 # almide.lock — auto-generated, do not edit
 
-bindgen = { git = "https://github.com/almide/almide-bindgen.git", ref = "main", commit = "7bbbe2d2d0b524198c645bcd26e47451703d23df" }
+bindgen = { git = "https://github.com/almide/almide-bindgen.git", ref = "main", commit = "a6b0f6edb700c21b0db68f7d9e8ff1c44f505fad" }
 wasm_bindgen = { git = "https://github.com/almide/almide-wasm-bindgen.git", ref = "main", commit = "a32cc0730f310088ada9810a7494d3994cb8f1f5" }
