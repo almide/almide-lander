@@ -146,8 +146,8 @@ effect fn run_wasm_target(args: List[String]) -> Unit = {
 
   println("[1/4] Compiling interface from ${source_path}...")
   let iface_json = process.exec("almide", ["compile", source_path, "--json"])!
-  let iface = json.parse(iface_json) ?? json.null()
-  let module_name = json.as_string(json.get(iface, "module") ?? json.from_string("module")) ?? "module"
+  let iface = json.parse(iface_json) ?? value.null()
+  let module_name = value.as_string(value.get(iface, "module") ?? value.string("module"))? ?? "module"
 
   let wasm_path = "${outdir}/${module_name}.wasm"
   println("[2/4] Building ${wasm_path} (--target wasm)...")
@@ -177,10 +177,10 @@ effect fn run_wasm_target(args: List[String]) -> Unit = {
   let wit = wasm_bindgen.generate_wit(iface_json, module_name)
   let pkg = wasm_bindgen.generate_package_json(module_name, pkg_version)
 
-  fs.write("${outdir}/${module_name}.js", esm)!
-  fs.write("${outdir}/${module_name}.d.ts", dts)!
-  fs.write("${outdir}/${module_name}.wit", wit)!
-  fs.write("${outdir}/package.json", pkg)!
+  fs.write_text("${outdir}/${module_name}.js", esm)!
+  fs.write_text("${outdir}/${module_name}.d.ts", dts)!
+  fs.write_text("${outdir}/${module_name}.wit", wit)!
+  fs.write_text("${outdir}/package.json", pkg)!
 
   println("[4/4] Done.")
   println("  ${wasm_path}")
